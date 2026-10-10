@@ -6,7 +6,8 @@ import { Pathfinder } from '../world/pathfinding';
 import { SpatialHash } from '../world/spatial';
 import { Citizen } from './citizen';
 import { Chronicle, EventKind } from '../events/chronicle';
-import { TICKS_PER_HOUR, getTime, seasonOf, Season } from '../core/time';
+import { TICKS_PER_HOUR, TICKS_PER_DAY, getTime, seasonOf, Season } from '../core/time';
+import { collectTaxes } from '../economy/taxes';
 import { createPopulation } from './population';
 import { stepCitizens } from './systems';
 import { Stats, collectStats } from './stats';
@@ -31,6 +32,8 @@ export class Simulation {
   /** Казна */
   treasury = 0;
   taxRate = 0.1;
+  lastTax = 0;
+  lastCharity = 0;
   stats: Stats;
   /** Камера (центр в тайлах) — для LOD */
   focusX = 0;
@@ -40,8 +43,10 @@ export class Simulation {
   /** Погода (расширяется в фазе 6) */
   weather = { rain: 0, fog: 0, snow: 0, wind: 0.3, temp: 15 };
   /** Счётчики для инвариантов */
-  moneyCreated = 0; // деньги, созданные системой (караваны, бог)
+  moneyCreated = 0; // деньги, созданные системой (внешняя торговля, караваны, бог)
   moneyDestroyed = 0;
+  exportIncome = 0; // выручка от продажи сырья за город
+  importCost = 0; // расходы лавок на закупку сырья за городом
 
   constructor(opts: SimOptions) {
     this.seedText = opts.seedText;
@@ -82,6 +87,7 @@ export class Simulation {
       this.spatial.insert(c.id, c.x, c.y);
     }
     stepCitizens(this);
+    if (this.tick % TICKS_PER_DAY === 6 * TICKS_PER_HOUR) collectTaxes(this);
     if (this.tick % 600 === 0) this.stats = collectStats(this);
   }
 

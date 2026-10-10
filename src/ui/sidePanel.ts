@@ -1,8 +1,10 @@
 import type { Game } from '../main';
-import { Citizen, fullName, professionName, NEED_NAMES, NeedKey, traitName, TRAIT_NAMES, isChild } from '../sim/citizen';
+import { Citizen, fullName, professionName, NEED_NAMES, NeedKey, traitName, TRAIT_NAMES } from '../sim/citizen';
 import { Building, BUILDING_DEFS, DISTRICT_NAMES } from '../world/buildings';
 import { formatDate } from '../core/time';
 import { getCitizenSprite } from '../render/citizenSprites';
+import { ACTION_LABELS } from '../ai/actions';
+import { moodWord } from '../sim/needs';
 
 export class SidePanel {
   el: HTMLElement;
@@ -61,7 +63,8 @@ export class SidePanel {
   }
 
   citizenTooltip(c: Citizen): string {
-    return `<b>${fullName(c)}</b>, ${c.age} · ${professionName(c)}<br><i>${c.thought || ''}</i>`;
+    const act = ACTION_LABELS[c.action] ?? '';
+    return `<b>${fullName(c)}</b>, ${c.age} · ${professionName(c)}<br>${act} · ${moodWord(c.mood)}<br><i>${c.thought || ''}</i>`;
   }
 
   buildingTooltip(b: Building): string {
@@ -112,7 +115,7 @@ export class SidePanel {
       <button class="close" title="Закрыть (Esc)">✕</button>
       ${portrait}
       <h2>${fullName(c)}</h2>
-      <div class="sub">${professionName(c)}, ${c.age} ${ageWord(c.age)}${isChild(c) ? '' : ''}</div>
+      <div class="sub">${professionName(c)}, ${c.age} ${ageWord(c.age)} · ${ACTION_LABELS[c.action] ?? ''} · ${moodWord(c.mood)}</div>
       <div class="thought">«${c.thought || '…'}»</div>
       <div class="traits">${traits}</div>
       <div class="section"><h3>Потребности</h3>${needs}</div>

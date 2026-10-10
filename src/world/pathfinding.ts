@@ -2,53 +2,57 @@
 import { World, moveCost, inBounds } from './world';
 
 class MinHeap {
-  private keys: number[] = [];
-  private vals: number[] = [];
-  get size(): number {
-    return this.keys.length;
-  }
+  private keys = new Float64Array(4096);
+  private vals = new Int32Array(4096);
+  size = 0;
   push(key: number, val: number): void {
+    if (this.size >= this.keys.length) {
+      const nk = new Float64Array(this.keys.length * 2);
+      nk.set(this.keys);
+      this.keys = nk;
+      const nv = new Int32Array(this.vals.length * 2);
+      nv.set(this.vals);
+      this.vals = nv;
+    }
     const k = this.keys;
     const v = this.vals;
-    k.push(key);
-    v.push(val);
-    let i = k.length - 1;
+    let i = this.size++;
     while (i > 0) {
       const p = (i - 1) >> 1;
-      if (k[p] <= k[i]) break;
-      [k[p], k[i]] = [k[i], k[p]];
-      [v[p], v[i]] = [v[i], v[p]];
+      if (k[p] <= key) break;
+      k[i] = k[p];
+      v[i] = v[p];
       i = p;
     }
+    k[i] = key;
+    v[i] = val;
   }
   pop(): number {
     const k = this.keys;
     const v = this.vals;
     const top = v[0];
-    const lastK = k.pop()!;
-    const lastV = v.pop()!;
-    if (k.length > 0) {
-      k[0] = lastK;
-      v[0] = lastV;
+    const n = --this.size;
+    if (n > 0) {
+      const lastK = k[n];
+      const lastV = v[n];
       let i = 0;
-      const n = k.length;
       for (;;) {
         const l = 2 * i + 1;
+        if (l >= n) break;
         const r = l + 1;
-        let m = i;
-        if (l < n && k[l] < k[m]) m = l;
-        if (r < n && k[r] < k[m]) m = r;
-        if (m === i) break;
-        [k[m], k[i]] = [k[i], k[m]];
-        [v[m], v[i]] = [v[i], v[m]];
+        const m = r < n && k[r] < k[l] ? r : l;
+        if (k[m] >= lastK) break;
+        k[i] = k[m];
+        v[i] = v[m];
         i = m;
       }
+      k[i] = lastK;
+      v[i] = lastV;
     }
     return top;
   }
   clear(): void {
-    this.keys.length = 0;
-    this.vals.length = 0;
+    this.size = 0;
   }
 }
 
@@ -150,12 +154,14 @@ export class Pathfinder {
     heap.clear();
     const tx = to % W;
     const ty = (to / W) | 0;
+    // Октильная эвристика с весом 1.25 (чуть неоптимальные пути, зато в разы меньше раскрытий)
+    const HW = 1.25;
     const h = (i: number) => {
       const x = i % W;
       const y = (i / W) | 0;
       const dx = Math.abs(x - tx);
       const dy = Math.abs(y - ty);
-      return (dx + dy) + Math.min(dx, dy) * (1.4142 - 2) * 0; // манхэттен (допустимая эвристика при cost>=1)
+      return (Math.max(dx, dy) + 0.4142 * Math.min(dx, dy)) * HW;
     };
     st[from] = stamp;
     gS[from] = 0;

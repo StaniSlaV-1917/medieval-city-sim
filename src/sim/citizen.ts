@@ -31,6 +31,7 @@ export const enum Profession {
   Stablehand = 26,
   Fireman = 27,
   Servant = 28,
+  Laborer = 29,
 }
 
 export const PROFESSION_NAMES: Record<number, { m: string; f: string }> = {
@@ -63,6 +64,7 @@ export const PROFESSION_NAMES: Record<number, { m: string; f: string }> = {
   [Profession.Stablehand]: { m: 'Конюх', f: 'Конюх' },
   [Profession.Fireman]: { m: 'Пожарный', f: 'Пожарный' },
   [Profession.Servant]: { m: 'Слуга', f: 'Служанка' },
+  [Profession.Laborer]: { m: 'Подёнщик', f: 'Подёнщица' },
 };
 
 export const enum Trait {
