@@ -101,6 +101,10 @@ export function newCitizen(sim: Simulation, p: { firstName: string; lastName: st
     mood: 0,
     animPhase: 0,
     flags: 0,
+    order: null,
+    hp: 100,
+    jailedUntil: 0,
+    notoriety: 0,
   };
   sim.citizens.push(c);
   return c;

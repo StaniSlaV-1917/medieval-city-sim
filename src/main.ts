@@ -9,6 +9,7 @@ import { TILE } from './render/camera';
 import { SidePanel } from './ui/sidePanel';
 import { ChronicleView } from './ui/chronicleView';
 import { MarketPanel } from './ui/marketPanel';
+import type { OrderDef } from './ai/orders';
 
 export class Game {
   sim: Simulation;
@@ -20,6 +21,8 @@ export class Game {
   marketPanel: MarketPanel;
   speed = 1;
   paused = false;
+  /** Режим выбора цели для приказа */
+  targeting: { order: OrderDef; citizen: number } | null = null;
   private acc = 0;
   private lastTime = 0;
   private fps = 60;
@@ -101,6 +104,11 @@ export class Game {
   }
 
   deselect(): void {
+    if (this.targeting) {
+      this.targeting = null;
+      this.renderer.canvas.style.cursor = 'default';
+      return;
+    }
     this.renderer.selectedCitizen = -1;
     this.renderer.selectedBuilding = -1;
     this.renderer.camera.follow = null;
@@ -108,6 +116,24 @@ export class Game {
   }
 
   onClick(sx: number, sy: number): void {
+    if (this.targeting) {
+      const t = this.targeting;
+      const cid0 = this.renderer.pickCitizen(sx, sy);
+      const bid0 = this.renderer.pickBuilding(sx, sy);
+      const w = this.renderer.camera.screenToWorld(sx, sy);
+      const tx = Math.floor(w.x / TILE);
+      const ty = Math.floor(w.y / TILE);
+      if (t.order.target === 'citizen' && cid0 >= 0) this.side.applyTarget({ kind: 'citizen', id: cid0, x: tx, y: ty });
+      else if (t.order.target === 'building' && bid0 >= 0) {
+        const b = this.sim.world.buildings[bid0];
+        this.side.applyTarget({ kind: 'building', id: bid0, x: b.doorX, y: b.doorY });
+      } else if (t.order.target === 'tile') this.side.applyTarget({ kind: 'tile', id: -1, x: tx, y: ty });
+      else if (cid0 >= 0) this.side.applyTarget({ kind: 'citizen', id: cid0, x: tx, y: ty });
+      else if (bid0 >= 0) this.side.applyTarget({ kind: 'building', id: bid0, x: tx, y: ty });
+      else this.side.applyTarget({ kind: 'tile', id: -1, x: tx, y: ty });
+      this.renderer.canvas.style.cursor = 'default';
+      return;
+    }
     const cid = this.renderer.pickCitizen(sx, sy);
     if (cid >= 0) {
       this.selectCitizen(cid, true);
@@ -163,6 +189,7 @@ export class Game {
     this.sim.focusY = cam.y / TILE;
     this.input.update(dt);
     cam.update(dt);
+    this.renderer.canvas.style.cursor = this.targeting ? 'crosshair' : 'default';
     this.renderer.render(dt);
     this.hud.update(this.fps);
     this.updateHover();

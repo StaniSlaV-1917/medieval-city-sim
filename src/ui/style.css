@@ -150,3 +150,9 @@ html, body {
 #market .slider { margin-top: 6px; display: flex; align-items: center; gap: 8px; }
 #market .slider input { flex: 1; }
 #hud .btn.market { margin-left: 6px; }
+#side .orders .cats { display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 4px; }
+#side .orders .list { display: flex; flex-wrap: wrap; gap: 3px; }
+#side .orders .target { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; font-size: 12px; }
+#side .orders select { font: inherit; font-size: 12px; padding: 2px 4px; background: #fbf6ea; border: 1px solid var(--border); border-radius: 3px; }
+#side .orders .cur { margin-top: 6px; font-style: italic; color: #2a4a9a; }
+#side .orders .reaction { margin-top: 6px; padding: 4px 6px; background: rgba(255,255,255,0.4); border-left: 3px solid var(--gold); font-size: 12px; }

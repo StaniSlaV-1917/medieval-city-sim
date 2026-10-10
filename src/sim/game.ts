@@ -41,6 +41,10 @@ export class Simulation {
   /** Текущие разговоры (ключ — id первого собеседника) */
   talks = new Map<number, Talk>();
   market = new Market();
+  /** Принудительный исход ближайшего разговора по приказу: 1 — дружба, 2 — ссора, 3 — флирт */
+  forcedTalk: { a: number; mode: number } | null = null;
+  /** Ожидающая свадьба (для церемонии) */
+  pendingWedding: { a: number; b: number; tick: number } | null = null;
   /** Дневные снимки для графиков */
   history: { day: number; population: number; treasury: number; bread: number; avgHunger: number; avgMood: number; money: number }[] = [];
   /** Камера (центр в тайлах) — для LOD */

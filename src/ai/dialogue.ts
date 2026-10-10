@@ -248,7 +248,7 @@ export function makeLine(ctx: LineCtx, topic: Topic, replyTo: Line | null): Line
       line.about = oid;
       const arr = v > 25 ? GOSSIP.praise : v < -20 ? GOSSIP.blame : GOSSIP.neutral;
       line.text = fill(pick(rng, arr), ctx, other);
-      line.rumor = { text: `${fullName(speaker)} ${v > 0 ? 'хвалил' : 'ругал'} ${accusative(other.firstName)} ${other.lastName}`, importance: 0.2, about: oid, topic: v > 0 ? 'praise' : 'blame' };
+      line.rumor = { text: `${fullName(speaker)} ${v > 0 ? 'хвалил' : 'ругал'}${speaker.sex === 'f' ? 'а' : ''} ${accusative(other.firstName)} ${other.lastName}`, importance: 0.2, about: oid, topic: v > 0 ? 'praise' : 'blame' };
       break;
     }
     case 'memory': {

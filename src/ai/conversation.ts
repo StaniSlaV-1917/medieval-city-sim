@@ -17,6 +17,7 @@ export interface Talk {
   prevTopic: Topic | null;
   quarrel: boolean;
   speaker: number; // кто говорит следующим
+  forced: number;
 }
 
 setStartTalk((sim, a, b) => startTalk(sim, a, b));
@@ -45,20 +46,22 @@ export function updateConversations(sim: Simulation): void {
       const ctx = { sim, rng: sim.rng, speaker: sp, listener: li };
       // ссора может вспыхнуть посреди разговора
       if (!t.quarrel && t.index > 0 && t.index < t.lines - 1) {
-        let p = 0.01;
-        if (hasTrait(sp, Trait.HotTempered)) p += 0.08;
+        let p = 0.004;
+        if (hasTrait(sp, Trait.HotTempered)) p += 0.04;
         if (hasTrait(sp, Trait.Envious) && li.money > sp.money * 2) p += 0.05;
         if (sp.drunk > 50) p += 0.08;
         if (relation(sp, li.id) < -20) p += 0.1;
         if (sp.mood < -30) p += 0.05;
         if (hasTrait(sp, Trait.Kind) || hasTrait(sp, Trait.Cowardly)) p *= 0.3;
+        if (t.forced === 1 || t.forced === 3) p = 0;
         if (isChild(sp) || isChild(li)) p *= 0.2;
         if (sim.rng.chance(p)) {
           t.quarrel = true;
           t.lines = Math.min(t.lines + 2, t.index + 4);
         }
       }
-      const topic = pickTopic(ctx, t.prevTopic, t.index, t.lines, t.quarrel);
+      let topic = pickTopic(ctx, t.prevTopic, t.index, t.lines, t.quarrel);
+      if (t.forced === 3 && t.index > 0 && t.index < t.lines - 1) topic = 'flirt';
       const line = makeLine(ctx, topic, t.lastLine);
       say(sp, line.text, 45, false, tick);
       // слух передан
@@ -149,9 +152,16 @@ export function startTalk(sim: Simulation, a: Citizen, b: Citizen): boolean {
   if (hasTrait(a, Trait.Gloomy) && hasTrait(b, Trait.Gloomy)) lines = 2;
   let quarrel = false;
   const rel = relation(a, b.id);
+  let forced = 0;
+  if (sim.forcedTalk && sim.forcedTalk.a === a.id) {
+    forced = sim.forcedTalk.mode;
+    sim.forcedTalk = null;
+    if (forced === 2) quarrel = true;
+    if (forced === 1) lines += 2;
+  }
   if (rel < -30 && sim.rng.chance(0.4)) quarrel = true;
   if (hasTrait(a, Trait.HotTempered) && a.drunk > 40 && sim.rng.chance(0.3)) quarrel = true;
-  sim.talks.set(a.id, { a: a.id, b: b.id, lines, index: 0, nextLine: sim.tick + 3, lastLine: null, prevTopic: null, quarrel, speaker: a.id });
+  sim.talks.set(a.id, { a: a.id, b: b.id, lines, index: 0, nextLine: sim.tick + 3, lastLine: null, prevTopic: null, quarrel, speaker: a.id, forced });
   return true;
 }
 
@@ -177,7 +187,7 @@ function endTalk(sim: Simulation, t: Talk, completed: boolean): void {
     b.mood -= 10;
     remember(a, tick, `Поссорился${a.sex === 'f' ? 'ась' : 'ся'} с ${fullName(b)}.`, 0.45, b.id, 'quarrel');
     remember(b, tick, `Поссорился${b.sex === 'f' ? 'ась' : 'ся'} с ${fullName(a)}.`, 0.45, a.id, 'quarrel');
-    if (sim.rng.chance(0.4)) sim.chronicle.log(tick, EventKind.Social, `${fullName(a)} и ${fullName(b)} поругались на улице.`, Math.round(a.x), Math.round(a.y), [a.id, b.id], 0.3);
+    if (sim.rng.chance(0.25)) sim.chronicle.log(tick, EventKind.Social, `${fullName(a)} и ${fullName(b)} поругались на улице.`, Math.round(a.x), Math.round(a.y), [a.id, b.id], 0.3);
     // свидетели запоминают
     sim.spatial.query(a.x, a.y, 5, scratch);
     for (const oid of scratch) {
@@ -190,6 +200,8 @@ function endTalk(sim: Simulation, t: Talk, completed: boolean): void {
   }
   // Удачный разговор: общение, отношения по совместимости
   let delta = 2 + sim.rng.int(0, 3);
+  if (t.forced === 1) delta += 6;
+  if (t.forced === 3) delta += 5;
   const compat = compatibility(a, b);
   delta += compat;
   if (hasTrait(a, Trait.Cheerful) || hasTrait(b, Trait.Cheerful)) delta += 1;

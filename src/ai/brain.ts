@@ -2,10 +2,11 @@
 import type { Simulation } from '../sim/game';
 import { Citizen, CitizenState, Trait, hasTrait } from '../sim/citizen';
 import { ACTIONS, ActionCtx, ActionDef } from './actions';
+import '../ai/orders';
 import { scheduleOf } from '../sim/schedule';
 import { hourOf } from '../core/time';
 
-const ORDER: ActionDef[] = Object.values(ACTIONS);
+let ORDER: ActionDef[] = [];
 
 export function makeCtx(sim: Simulation, c: Citizen): ActionCtx {
   return { sim, c, hour: hourOf(sim.tick), sched: scheduleOf(sim, c), rng: sim.rng };
@@ -13,7 +14,13 @@ export function makeCtx(sim: Simulation, c: Citizen): ActionCtx {
 
 /** Выбрать и начать лучшее действие */
 export function think(sim: Simulation, c: Citizen): void {
+  if (!ORDER.length) ORDER = Object.values(ACTIONS);
   const ctx = makeCtx(sim, c);
+  if (c.order) {
+    c.action = 'order';
+    if (!ACTIONS.order.start(ctx)) c.order = null;
+    return;
+  }
   let best: ActionDef | null = null;
   let bestScore = -Infinity;
   const noise = hasTrait(c, Trait.Curious) ? 6 : 3;

@@ -273,6 +273,7 @@ const work: ActionDef = {
     const { c, hour, sched } = ctx;
     if (c.workplace < 0 || !isWorkHour(sched, hour)) return 0;
     if (c.profession === Profession.Guard) return 0; // у стражи — патруль
+    if (c.actionData.dayOff === Math.floor(ctx.sim.tick / TICKS_PER_DAY)) return 0;
     let s = 50;
     if (hasTrait(c, Trait.Hardworking)) s += 10;
     if (hasTrait(c, Trait.Ambitious)) s += 6;
@@ -484,6 +485,7 @@ const patrol: ActionDef = {
   score(ctx) {
     const { c, hour, sched } = ctx;
     if (c.profession !== Profession.Guard || !isWorkHour(sched, hour)) return 0;
+    if (c.actionData.dayOff === Math.floor(ctx.sim.tick / TICKS_PER_DAY)) return 0;
     let s = 55;
     if (c.needs.hunger < 20) s -= 20;
     if (c.needs.energy < 10) s -= 25;
@@ -730,6 +732,7 @@ const haul: ActionDef = {
     const { c, hour, sched, sim } = ctx;
     if (c.workplace < 0 || !isWorkHour(sched, hour)) return 0;
     if (c.profession === Profession.Guard || c.profession === Profession.Bard) return 0;
+    if (c.actionData.dayOff === Math.floor(sim.tick / TICKS_PER_DAY)) return 0;
     const b = workOf(ctx);
     if (!b) return 0;
     const r = RECIPES[b.type];
@@ -1259,6 +1262,7 @@ export const ACTION_LABELS: Record<string, string> = {
   visit_friend: 'идёт к другу',
   haul: 'везёт припасы',
   shop: 'ходит по лавкам',
+  order: 'выполняет приказ',
 };
 
 export { District, EventKind };

@@ -228,6 +228,33 @@ export interface Citizen {
   animPhase: number;
   /** Флаги */
   flags: number;
+  /** Текущий приказ игрока (null — нет) */
+  order: Order | null;
+  /** Здоровье «тела» для драк 0..100 */
+  hp: number;
+  /** Тик, до которого в тюрьме (0 — нет) */
+  jailedUntil: number;
+  /** Репутация преступника 0..100 (известность страже) */
+  notoriety: number;
+}
+
+export interface OrderTarget {
+  kind: 'citizen' | 'building' | 'tile';
+  id: number;
+  x: number;
+  y: number;
+}
+
+export interface Order {
+  type: string;
+  target: OrderTarget | null;
+  good?: string;
+  /** Этап выполнения */
+  phase: number;
+  /** Дополнительные данные */
+  data: Record<string, number>;
+  /** Тик выдачи */
+  givenAt: number;
 }
 
 export const FLAG_FIREMAN = 1; // доброволец-пожарный
