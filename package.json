@@ -1,0 +1,21 @@
+{
+  "name": "waldmark",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Вальдмарк — симулятор живого средневекового города (браузерная песочница, полностью офлайн)",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && tsc --noEmit -p test/tsconfig.json && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p test/tsconfig.json",
+    "test": "tsx test/headless.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "vite": "^7.3.0",
+    "vite-plugin-singlefile": "^2.3.0"
+  }
+}

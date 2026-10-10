@@ -1,0 +1,423 @@
+// Главный рендерер: земля, объекты с сортировкой по Y, жители, освещение, частицы.
+import { Simulation } from '../sim/game';
+import { Camera, TILE } from './camera';
+import { TileMapRenderer } from './tilemap';
+import { getBuildingSprite } from './buildingSprites';
+import { getPropSprite, getWallSprite, getLightSprite, getWarmLightSprite } from './propSprites';
+import { Tile } from '../world/tiles';
+import { idx, PropType } from '../world/world';
+import { BuildingType } from '../world/buildings';
+import { daylight, Season, hourOf } from '../core/time';
+import { SEASON_PALETTES } from './palette';
+import { makeCanvas, ctx2d, hash2 } from './atlas';
+import { Citizen, CitizenState } from '../sim/citizen';
+import { getCitizenSprite } from './citizenSprites';
+import { drawBubbles } from './bubbles';
+
+interface Drawable {
+  y: number; // ключ сортировки (мировые px)
+  kind: 0 | 1 | 2 | 3; // 0 здание, 1 проп, 2 житель, 3 стена
+  ref: number;
+}
+
+interface Smoke {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  life: number;
+  maxLife: number;
+  size: number;
+}
+
+export class Renderer {
+  canvas: HTMLCanvasElement;
+  g: CanvasRenderingContext2D;
+  lightCanvas: HTMLCanvasElement;
+  lg: CanvasRenderingContext2D;
+  camera: Camera;
+  tilemap: TileMapRenderer;
+  sim: Simulation;
+  private drawables: Drawable[] = [];
+  private smoke: Smoke[] = [];
+  private smokeAcc = 0;
+  /** Сдвиг в тиках для интерполяции (0..1) */
+  alpha = 0;
+  /** Выделенный житель/здание */
+  selectedCitizen = -1;
+  selectedBuilding = -1;
+  hoverCitizen = -1;
+  /** Отладочная информация */
+  debug = { drawn: 0, lights: 0 };
+  time = 0;
+  showOverlay: 'none' = 'none';
+
+  constructor(canvas: HTMLCanvasElement, sim: Simulation) {
+    this.canvas = canvas;
+    this.g = ctx2d(canvas);
+    this.sim = sim;
+    this.camera = new Camera(sim.world.w * TILE, sim.world.h * TILE);
+    this.tilemap = new TileMapRenderer(sim.world);
+    this.lightCanvas = makeCanvas(canvas.width, canvas.height);
+    this.lg = ctx2d(this.lightCanvas);
+  }
+
+  resize(w: number, h: number): void {
+    this.canvas.width = w;
+    this.canvas.height = h;
+    this.lightCanvas.width = w;
+    this.lightCanvas.height = h;
+    this.g = ctx2d(this.canvas);
+    this.lg = ctx2d(this.lightCanvas);
+    this.camera.resize(w, h);
+  }
+
+  render(dt: number): void {
+    this.time += dt;
+    const g = this.g;
+    const cam = this.camera;
+    const sim = this.sim;
+    const world = sim.world;
+    const season = sim.season;
+    const pal = SEASON_PALETTES[season];
+    this.tilemap.setSeason(season);
+    const W = this.canvas.width;
+    const H = this.canvas.height;
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.fillStyle = '#1a2a3a';
+    g.fillRect(0, 0, W, H);
+    g.imageSmoothingEnabled = false;
+    const z = cam.zoom;
+    const ox = Math.round(W / 2 - cam.x * z);
+    const oy = Math.round(H / 2 - cam.y * z);
+    g.setTransform(z, 0, 0, z, ox, oy);
+    const view = cam.viewRect();
+    // Земля
+    this.tilemap.draw(g, view.x0, view.y0, view.x1, view.y1);
+    // Объекты
+    this.collectDrawables(view.x0 - 64, view.y0 - 96, view.x1 + 64, view.y1 + 32);
+    this.drawables.sort((a, b) => a.y - b.y || a.kind - b.kind || a.ref - b.ref);
+    const snow = pal.snow;
+    const light = daylight(sim.tick);
+    let drawn = 0;
+    for (const d of this.drawables) {
+      drawn++;
+      if (d.kind === 0) this.drawBuilding(g, d.ref, snow);
+      else if (d.kind === 1) this.drawProp(g, d.ref, season);
+      else if (d.kind === 2) this.drawCitizen(g, sim.citizens[d.ref]);
+      else this.drawWall(g, d.ref, snow);
+    }
+    this.debug.drawn = drawn;
+    // Выделение
+    if (this.selectedBuilding >= 0) {
+      const b = world.buildings[this.selectedBuilding];
+      if (b) {
+        g.strokeStyle = 'rgba(255,230,120,0.9)';
+        g.lineWidth = 1 / z;
+        g.strokeRect(b.x * TILE + 0.5, b.y * TILE + 0.5, b.w * TILE - 1, b.h * TILE - 1);
+      }
+    }
+    // Дым
+    this.updateSmoke(dt, view);
+    this.drawSmoke(g);
+    // Ночное освещение
+    this.drawLighting(light, view, z, ox, oy);
+    // Пузыри речи
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    drawBubbles(g, this, sim);
+  }
+
+  private collectDrawables(x0: number, y0: number, x1: number, y1: number): void {
+    const world = this.sim.world;
+    const out = this.drawables;
+    out.length = 0;
+    const tx0 = Math.max(0, Math.floor(x0 / TILE));
+    const ty0 = Math.max(0, Math.floor(y0 / TILE));
+    const tx1 = Math.min(world.w - 1, Math.ceil(x1 / TILE));
+    const ty1 = Math.min(world.h - 1, Math.ceil(y1 / TILE));
+    // Здания: по тайлам (футпринт), добавить каждое 1 раз
+    const seen = new Set<number>();
+    for (let y = ty0; y <= ty1; y++) {
+      for (let x = tx0; x <= tx1; x++) {
+        const i = y * world.w + x;
+        const bid = world.buildingAt[i];
+        if (bid >= 0 && !seen.has(bid)) {
+          seen.add(bid);
+          const b = world.buildings[bid];
+          out.push({ y: (b.y + b.h) * TILE - 0.5, kind: 0, ref: bid });
+        }
+        const t = world.tiles[i];
+        if (t === Tile.Wall || t === Tile.Tower || t === Tile.Gate) out.push({ y: (y + 1) * TILE - 0.25, kind: 3, ref: i });
+      }
+    }
+    // Пропы
+    const props = world.props;
+    for (let i = 0; i < props.length; i++) {
+      const p = props[i];
+      if (p.x < tx0 - 1 || p.x > tx1 + 1 || p.y < ty0 - 2 || p.y > ty1 + 1) continue;
+      out.push({ y: (p.y + p.oy) * TILE, kind: 1, ref: i });
+    }
+    // Жители
+    const cs = this.sim.citizens;
+    const a = this.alpha;
+    for (let i = 0; i < cs.length; i++) {
+      const c = cs[i];
+      if (!c.alive || c.inside >= 0) continue;
+      const cx = c.px + (c.x - c.px) * a;
+      const cy = c.py + (c.y - c.py) * a;
+      if (cx < tx0 - 1 || cx > tx1 + 1 || cy < ty0 - 1 || cy > ty1 + 1) continue;
+      out.push({ y: (cy + 0.5) * TILE + 0.1, kind: 2, ref: i });
+    }
+  }
+
+  private drawBuilding(g: CanvasRenderingContext2D, id: number, snow: boolean): void {
+    const b = this.sim.world.buildings[id];
+    const s = getBuildingSprite(b, snow);
+    g.drawImage(s.canvas, b.x * TILE + s.ox, b.y * TILE + s.oy);
+    if (this.selectedBuilding === id) {
+      g.globalAlpha = 0.25;
+      g.fillStyle = '#ffe070';
+      g.fillRect(b.x * TILE + s.ox, b.y * TILE + s.oy, s.canvas.width, s.canvas.height);
+      g.globalAlpha = 1;
+    }
+  }
+
+  private drawProp(g: CanvasRenderingContext2D, i: number, season: Season): void {
+    const p = this.sim.world.props[i];
+    const s = getPropSprite(p.type, p.variant, season);
+    const x = Math.round((p.x + p.ox) * TILE - s.ax);
+    const y = Math.round((p.y + p.oy) * TILE - s.ay);
+    if (p.type === PropType.Waterwheel) {
+      // вращение колеса
+      g.save();
+      g.translate(x + s.ax, y + s.ay - 8);
+      g.rotate(this.time * 0.8);
+      g.drawImage(s.canvas, s.x, s.y, s.w, s.h, -s.ax, -s.ay + 8, s.w, s.h);
+      g.restore();
+      return;
+    }
+    g.drawImage(s.canvas, s.x, s.y, s.w, s.h, x, y, s.w, s.h);
+  }
+
+  private drawWall(g: CanvasRenderingContext2D, i: number, snow: boolean): void {
+    const world = this.sim.world;
+    const t = world.tiles[i];
+    const x = i % world.w;
+    const y = (i / world.w) | 0;
+    const s = getWallSprite(t === Tile.Tower ? 'tower' : t === Tile.Gate ? 'gate' : 'wall', i, snow);
+    g.drawImage(s.canvas, s.x, s.y, s.w, s.h, x * TILE + 8 - s.ax, (y + 1) * TILE - s.ay, s.w, s.h);
+  }
+
+  private drawCitizen(g: CanvasRenderingContext2D, c: Citizen): void {
+    const a = this.alpha;
+    const cx = (c.px + (c.x - c.px) * a + 0.5) * TILE;
+    const cy = (c.py + (c.y - c.py) * a + 0.5) * TILE;
+    const moving = c.state === CitizenState.Moving;
+    const frame = moving ? (Math.floor(c.animPhase) % 4) : 0;
+    const s = getCitizenSprite(c, c.dir, frame);
+    const x = Math.round(cx - s.ax);
+    const y = Math.round(cy + 3 - s.ay);
+    // тень
+    g.fillStyle = 'rgba(0,0,0,0.22)';
+    g.fillRect(Math.round(cx) - 3, Math.round(cy) + 1, 6, 2);
+    g.drawImage(s.canvas, s.x, s.y, s.w, s.h, x, y, s.w, s.h);
+    if (this.selectedCitizen === c.id || this.hoverCitizen === c.id) {
+      g.strokeStyle = this.selectedCitizen === c.id ? 'rgba(255,230,120,0.95)' : 'rgba(255,255,255,0.6)';
+      g.lineWidth = 1;
+      g.beginPath();
+      g.ellipse(Math.round(cx), Math.round(cy) + 2, 6, 3, 0, 0, Math.PI * 2);
+      g.stroke();
+    }
+  }
+
+  // ---------------------------------------------------------------- Дым
+
+  private updateSmoke(dt: number, view: { x0: number; y0: number; x1: number; y1: number }): void {
+    const sim = this.sim;
+    const world = sim.world;
+    const hour = hourOf(sim.tick);
+    const season = sim.season;
+    const coldBoost = season === Season.Winter ? 1.6 : season === Season.Autumn ? 1.2 : 0.8;
+    const wind = world.wind;
+    this.smokeAcc += dt;
+    const emitEvery = 0.25;
+    while (this.smokeAcc > emitEvery) {
+      this.smokeAcc -= emitEvery;
+      // выбрать несколько видимых зданий с трубами
+      const snow = season === Season.Winter;
+      for (let k = 0; k < 6; k++) {
+        const b = world.buildings[(hash2(k, Math.floor(this.time * 4), sim.tick) * world.buildings.length) | 0];
+        if (!b) continue;
+        const bx = (b.x + b.w / 2) * TILE;
+        const by = b.y * TILE;
+        if (bx < view.x0 - 32 || bx > view.x1 + 32 || by < view.y0 - 64 || by > view.y1 + 32) continue;
+        const s = getBuildingSprite(b, snow);
+        if (!s.chimney) continue;
+        // активность: кухни утром/вечером, кузница и пекарня днём
+        let p = 0.1 * coldBoost;
+        if (b.type === BuildingType.Smithy && hour > 7 && hour < 18) p = 0.9;
+        else if (b.type === BuildingType.Bakery && hour > 3 && hour < 14) p = 0.9;
+        else if (b.type === BuildingType.Tavern && hour > 11) p = 0.5;
+        else if ((hour > 5.5 && hour < 8.5) || (hour > 17 && hour < 21)) p = 0.45 * coldBoost;
+        if (b.residents.length === 0 && b.workers.length === 0 && b.type !== BuildingType.Smithy) p *= 0.3;
+        if (hash2(b.id, Math.floor(this.time * 4), 7) > p) continue;
+        this.smoke.push({
+          x: b.x * TILE + s.chimney.x,
+          y: b.y * TILE + s.chimney.y,
+          vx: Math.cos(wind.dir) * wind.strength * 6 + (Math.random() - 0.5) * 2,
+          vy: -6 - Math.random() * 4,
+          life: 0,
+          maxLife: 2.5 + Math.random() * 2,
+          size: 1.5 + Math.random(),
+        });
+      }
+    }
+    for (let i = this.smoke.length - 1; i >= 0; i--) {
+      const s = this.smoke[i];
+      s.life += dt;
+      if (s.life > s.maxLife) {
+        this.smoke[i] = this.smoke[this.smoke.length - 1];
+        this.smoke.pop();
+        continue;
+      }
+      s.x += s.vx * dt;
+      s.y += s.vy * dt;
+      s.vy *= 0.98;
+      s.size += dt * 1.6;
+    }
+    if (this.smoke.length > 400) this.smoke.splice(0, this.smoke.length - 400);
+  }
+
+  private drawSmoke(g: CanvasRenderingContext2D): void {
+    for (const s of this.smoke) {
+      const t = s.life / s.maxLife;
+      g.globalAlpha = (1 - t) * 0.35;
+      g.fillStyle = '#cfd4da';
+      g.beginPath();
+      g.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+      g.fill();
+    }
+    g.globalAlpha = 1;
+  }
+
+  // ---------------------------------------------------------------- Освещение
+
+  private drawLighting(light: number, view: { x0: number; y0: number; x1: number; y1: number }, z: number, ox: number, oy: number): void {
+    const darkness = 1 - light;
+    if (darkness < 0.02) return;
+    const lg = this.lg;
+    const W = this.lightCanvas.width;
+    const H = this.lightCanvas.height;
+    lg.setTransform(1, 0, 0, 1, 0, 0);
+    lg.globalCompositeOperation = 'source-over';
+    lg.clearRect(0, 0, W, H);
+    // ночь: тёмно-синий
+    const a = darkness * 0.78;
+    lg.fillStyle = `rgba(12, 16, 48, ${a})`;
+    lg.fillRect(0, 0, W, H);
+    // Вырезать свет
+    lg.globalCompositeOperation = 'destination-out';
+    lg.setTransform(z, 0, 0, z, ox, oy);
+    const ls = getLightSprite();
+    const world = this.sim.world;
+    const flicker = 0.9 + 0.1 * Math.sin(this.time * 9);
+    let count = 0;
+    const snow = this.sim.season === Season.Winter;
+    const g = this.g;
+    g.setTransform(z, 0, 0, z, ox, oy);
+    const glow: { x: number; y: number; r: number; warm: number }[] = [];
+    // Окна зданий (только если «обитаемые» и вечер/ночь) — факелы/фонари всегда
+    for (const b of world.buildings) {
+      const bx = b.x * TILE;
+      const by = b.y * TILE;
+      if (bx + b.w * TILE < view.x0 - 48 || bx > view.x1 + 48 || by + b.h * TILE < view.y0 - 48 || by > view.y1 + 48) continue;
+      if (!b.lit) continue;
+      const s = getBuildingSprite(b, snow);
+      for (const l of s.lights) {
+        const r = l.r * darkness;
+        lg.globalAlpha = 0.85 * darkness;
+        lg.drawImage(ls, bx + l.x - r, by + l.y - r, r * 2, r * 2);
+        glow.push({ x: bx + l.x, y: by + l.y, r: r * 0.7, warm: l.warm });
+        count++;
+      }
+    }
+    // Факелы и фонари
+    for (const p of world.props) {
+      if (p.type !== PropType.Torch && p.type !== PropType.Lamp) continue;
+      const px = (p.x + p.ox) * TILE;
+      const py = (p.y + p.oy) * TILE - (p.type === PropType.Lamp ? 14 : 12);
+      if (px < view.x0 - 48 || px > view.x1 + 48 || py < view.y0 - 48 || py > view.y1 + 48) continue;
+      const r = 26 * darkness * flicker;
+      lg.globalAlpha = 0.95 * darkness;
+      lg.drawImage(ls, px - r, py - r, r * 2, r * 2);
+      glow.push({ x: px, y: py, r: r * 0.6, warm: 1.2 });
+      count++;
+    }
+    lg.globalAlpha = 1;
+    lg.globalCompositeOperation = 'source-over';
+    // Наложить темноту
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.drawImage(this.lightCanvas, 0, 0);
+    // Тёплое свечение поверх
+    g.setTransform(z, 0, 0, z, ox, oy);
+    g.globalCompositeOperation = 'lighter';
+    const wl = getWarmLightSprite();
+    for (const l of glow) {
+      g.globalAlpha = 0.3 * darkness * l.warm;
+      g.drawImage(wl, l.x - l.r, l.y - l.r, l.r * 2, l.r * 2);
+    }
+    // Светящиеся окна
+    g.globalAlpha = 0.9 * darkness;
+    g.fillStyle = '#ffd56a';
+    for (const l of glow) {
+      if (l.warm !== 1) continue;
+      g.fillRect(l.x - 1.5, l.y - 2, 3, 3.5);
+    }
+    g.globalAlpha = 1;
+    g.globalCompositeOperation = 'source-over';
+    this.debug.lights = count;
+  }
+
+  /** Поиск жителя под экранной точкой */
+  pickCitizen(sx: number, sy: number): number {
+    const w = this.camera.screenToWorld(sx, sy);
+    let best = -1;
+    let bestD = 12 * 12;
+    const a = this.alpha;
+    for (const c of this.sim.citizens) {
+      if (!c.alive || c.inside >= 0) continue;
+      const cx = (c.px + (c.x - c.px) * a + 0.5) * TILE;
+      const cy = (c.py + (c.y - c.py) * a + 0.5) * TILE - 5;
+      const dx = cx - w.x;
+      const dy = (cy - w.y) * 0.8;
+      const d = dx * dx + dy * dy;
+      if (d < bestD) {
+        bestD = d;
+        best = c.id;
+      }
+    }
+    return best;
+  }
+
+  pickBuilding(sx: number, sy: number): number {
+    const w = this.camera.screenToWorld(sx, sy);
+    const world = this.sim.world;
+    const tx = Math.floor(w.x / TILE);
+    const ty = Math.floor(w.y / TILE);
+    if (tx < 0 || ty < 0 || tx >= world.w || ty >= world.h) return -1;
+    const id = world.buildingAt[idx(world, tx, ty)];
+    if (id >= 0) return id;
+    // фасад выше футпринта: проверить тайлы ниже
+    for (let k = 1; k <= 3; k++) {
+      const yy = ty + k;
+      if (yy >= world.h) break;
+      const id2 = world.buildingAt[idx(world, tx, yy)];
+      if (id2 >= 0) {
+        const b = world.buildings[id2];
+        const s = getBuildingSprite(b, false);
+        if (w.y >= b.y * TILE + s.oy) return id2;
+      }
+    }
+    return -1;
+  }
+}

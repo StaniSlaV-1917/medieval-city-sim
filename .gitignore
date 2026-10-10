@@ -1,0 +1,7 @@
+node_modules/
+.vite/
+*.log
+.DS_Store
+# dist/index.html намеренно коммитится (собранная игра)
+dist/*
+!dist/index.html
