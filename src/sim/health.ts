@@ -49,6 +49,7 @@ export function updateHealth(sim: Simulation): void {
   if (tick % 50 === 0) {
     for (const c of sim.citizens) {
       if (!c.alive || c.inside >= 0 || c.action === 'fainted' || c.action === 'carried') continue;
+      if ((c.actionData.lastFaint ?? -1e9) > tick - TICKS_PER_DAY) continue;
       if ((c.needs.hunger <= 0 || c.needs.energy <= 0 || c.needs.health < 15) && sim.rng.chance(0.015)) faint(sim, c);
     }
   }
@@ -99,6 +100,7 @@ function progressSickness(sim: Simulation, c: Citizen): void {
 
 export function faint(sim: Simulation, c: Citizen): void {
   if (c.action === 'fainted' || c.action === 'carried' || c.jailedUntil > sim.tick) return;
+  c.actionData.lastFaint = sim.tick;
   interrupt(sim, c);
   c.action = 'fainted';
   c.state = CitizenState.Acting;
@@ -289,7 +291,7 @@ const hospital: ActionDef = {
     const c = ctx.c;
     c.hp = Math.min(100, c.hp + 0.6);
     c.needs.health = Math.min(100, c.needs.health + 0.35);
-    c.needs.hunger = Math.min(100, c.needs.hunger + 0.15);
+    c.needs.hunger = Math.min(100, c.needs.hunger + 0.5);
     c.needs.energy = Math.min(100, c.needs.energy + 0.2);
     if (c.hp >= 70) c.flags &= ~FLAG_INJURED;
     if (!(c.flags & (FLAG_SICK | FLAG_INJURED))) {

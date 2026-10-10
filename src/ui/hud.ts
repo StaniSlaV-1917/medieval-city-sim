@@ -45,6 +45,12 @@ export class Hud {
     mb.title = 'Цены, запасы и казна (M)';
     mb.addEventListener('click', () => game.marketPanel.toggle());
     hud.appendChild(mb);
+    const gb = document.createElement('button');
+    gb.className = 'btn god';
+    gb.textContent = 'Силы';
+    gb.title = 'Божественные силы (G)';
+    gb.addEventListener('click', () => game.godPanel.toggle());
+    hud.appendChild(gb);
     const tl = document.createElement('div');
     tl.id = 'topleft';
     tl.className = 'panel';
@@ -57,7 +63,7 @@ export class Hud {
     const help = document.createElement('div');
     help.id = 'help';
     help.className = 'panel';
-    help.innerHTML = `<kbd>WASD</kbd> камера · <kbd>колесо</kbd> зум · <kbd>пробел</kbd> пауза · <kbd>1</kbd>–<kbd>4</kbd> скорость · <kbd>F</kbd> следовать · <kbd>M</kbd> рынок · <kbd>Esc</kbd> снять`;
+    help.innerHTML = `<kbd>WASD</kbd> камера · <kbd>колесо</kbd> зум · <kbd>пробел</kbd> пауза · <kbd>1</kbd>–<kbd>4</kbd> скорость · <kbd>F</kbd> следовать · <kbd>M</kbd> рынок · <kbd>G</kbd> силы · <kbd>Esc</kbd> снять`;
     root.appendChild(help);
   }
 

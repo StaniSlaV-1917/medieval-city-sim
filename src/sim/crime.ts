@@ -987,8 +987,13 @@ export function crimeOrderStart(ctx: ActionCtx, o: Order): boolean {
       c.actionUntil = Math.min(c.jailedUntil, sim.tick + 600);
       return true;
     }
-    case 'arson':
-      return sim.arsonOrderStart ? sim.arsonOrderStart(ctx, o) : false;
+    case 'arson': {
+      const b = o.target && o.target.kind === 'building' ? sim.world.buildings[o.target.id] : null;
+      if (!b || b.condition <= 0) return false;
+      think(c, rng.pick(['Пусть горит.', 'Никто не увидит.', 'Факел, солома… и бежать.']));
+      c.actionData.building = b.id;
+      return goTo(ctx, b.doorX, b.doorY);
+    }
   }
   return false;
 }
@@ -1055,6 +1060,21 @@ export function crimeOrderArrive(ctx: ActionCtx, o: Order): void {
       }
       c.order = null;
       startFight(sim, c, t, 'затеял драку');
+      return;
+    }
+    case 'arson': {
+      const b = o.target && o.target.kind === 'building' ? sim.world.buildings[o.target.id] : null;
+      c.order = null;
+      if (!b) return actFor(ctx, 5);
+      const seen = sim.rng.chance(0.4);
+      if (sim.igniteBuilding) sim.igniteBuilding(b.id, 'поджог', 0.35);
+      c.notoriety = Math.min(100, c.notoriety + 15);
+      remember(c, sim.tick, `Поджёг${c.sex === 'f' ? 'ла' : ''} ${BUILDING_DEFS[b.type].name.toLowerCase()}.`, 0.8, -1, 'arson');
+      if (seen) {
+        raiseAlarm(sim, 'arson', b.doorX, b.doorY, c.id, -1);
+        sim.chronicle.log(sim.tick, EventKind.Crime, `${fullName(c)} видели с факелом у горящего здания!`, b.doorX, b.doorY, [c.id], 0.9);
+      }
+      startFlee(sim, c, b.doorX, b.doorY);
       return;
     }
     default:

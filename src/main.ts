@@ -9,6 +9,7 @@ import { TILE } from './render/camera';
 import { SidePanel } from './ui/sidePanel';
 import { ChronicleView } from './ui/chronicleView';
 import { MarketPanel } from './ui/marketPanel';
+import { GodPanel } from './ui/godPanel';
 import type { OrderDef } from './ai/orders';
 
 export class Game {
@@ -19,6 +20,8 @@ export class Game {
   side: SidePanel;
   chronicleView: ChronicleView;
   marketPanel: MarketPanel;
+  godPanel: GodPanel;
+  godTargeting: string | null = null;
   speed = 1;
   paused = false;
   /** Режим выбора цели для приказа */
@@ -39,6 +42,7 @@ export class Game {
     this.side = new SidePanel(ui, this);
     this.chronicleView = new ChronicleView(ui, this);
     this.marketPanel = new MarketPanel(ui, this);
+    this.godPanel = new GodPanel(ui, this);
     this.input = new Input(this, canvas);
     this.resize();
     window.addEventListener('resize', () => this.resize());
@@ -104,6 +108,10 @@ export class Game {
   }
 
   deselect(): void {
+    if (this.godTargeting) {
+      this.godTargeting = null;
+      return;
+    }
     if (this.targeting) {
       this.targeting = null;
       this.renderer.canvas.style.cursor = 'default';
@@ -116,6 +124,11 @@ export class Game {
   }
 
   onClick(sx: number, sy: number): void {
+    if (this.godTargeting) {
+      const w = this.renderer.camera.screenToWorld(sx, sy);
+      this.godPanel.applyAt(Math.floor(w.x / TILE), Math.floor(w.y / TILE));
+      return;
+    }
     if (this.targeting) {
       const t = this.targeting;
       const cid0 = this.renderer.pickCitizen(sx, sy);
@@ -189,13 +202,14 @@ export class Game {
     this.sim.focusY = cam.y / TILE;
     this.input.update(dt);
     cam.update(dt);
-    this.renderer.canvas.style.cursor = this.targeting ? 'crosshair' : 'default';
+    this.renderer.canvas.style.cursor = this.targeting || this.godTargeting ? 'crosshair' : 'default';
     this.renderer.render(dt);
     this.hud.update(this.fps);
     this.updateHover();
     this.side.update();
     this.chronicleView.update();
     this.marketPanel.update();
+    this.godPanel.update();
     requestAnimationFrame((t) => this.frame(t));
   }
 

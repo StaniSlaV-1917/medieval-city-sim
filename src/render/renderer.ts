@@ -53,7 +53,8 @@ export class Renderer {
   /** Отладочная информация */
   debug = { drawn: 0, lights: 0 };
   time = 0;
-  showOverlay: 'none' = 'none';
+  showOverlay: 'none' | 'crime' | 'fire' | 'wealth' = 'none';
+  private lastTileVersion = 0;
 
   constructor(canvas: HTMLCanvasElement, sim: Simulation) {
     this.canvas = canvas;
@@ -91,12 +92,19 @@ export class Renderer {
     g.fillRect(0, 0, W, H);
     g.imageSmoothingEnabled = false;
     const z = cam.zoom;
-    const ox = Math.round(W / 2 - cam.x * z);
-    const oy = Math.round(H / 2 - cam.y * z);
+    const shakeX = sim.shake > 0 ? (Math.random() - 0.5) * sim.shake * 12 : 0;
+    const shakeY = sim.shake > 0 ? (Math.random() - 0.5) * sim.shake * 12 : 0;
+    const ox = Math.round(W / 2 - cam.x * z + shakeX);
+    const oy = Math.round(H / 2 - cam.y * z + shakeY);
+    if (sim.tileVersion !== this.lastTileVersion) {
+      this.lastTileVersion = sim.tileVersion;
+      this.tilemap.invalidateAll();
+    }
     g.setTransform(z, 0, 0, z, ox, oy);
     const view = cam.viewRect();
     // Земля
     this.tilemap.draw(g, view.x0, view.y0, view.x1, view.y1);
+    this.drawFlood(g, view);
     // Объекты
     this.collectDrawables(view.x0 - 64, view.y0 - 96, view.x1 + 64, view.y1 + 32);
     this.drawables.sort((a, b) => a.y - b.y || a.kind - b.kind || a.ref - b.ref);
@@ -125,6 +133,7 @@ export class Renderer {
     this.updateSmoke(dt, view);
     this.drawSmoke(g);
     this.drawFires(g, dt);
+    this.drawDragon(g);
     // Ночное освещение
     this.drawLighting(light, view, z, ox, oy);
     // Погода
@@ -188,7 +197,7 @@ export class Renderer {
 
   private drawBuilding(g: CanvasRenderingContext2D, id: number, snow: boolean): void {
     const b = this.sim.world.buildings[id];
-    const damaged = b.condition <= 0 ? 2 : b.condition < 0.6 ? 1 : 0;
+    const damaged = b.underConstruction !== undefined ? 3 + Math.min(3, b.buildStage ?? 0) : b.condition <= 0 ? 2 : b.condition < 0.6 ? 1 : 0;
     const s = getBuildingSprite(b, snow, damaged);
     g.drawImage(s.canvas, b.x * TILE + s.ox, b.y * TILE + s.oy);
     if (b.underConstruction !== undefined && b.underConstruction < 1) {
@@ -345,6 +354,82 @@ export class Renderer {
       g.fill();
     }
     g.globalAlpha = 1;
+  }
+
+  private drawFlood(g: CanvasRenderingContext2D, view: { x0: number; y0: number; x1: number; y1: number }): void {
+    const f = this.sim.flood;
+    if (!f) return;
+    const w = this.sim.world.w;
+    const t = this.time;
+    g.fillStyle = 'rgba(60,110,170,0.6)';
+    for (const i of f.tiles) {
+      const x = (i % w) * TILE;
+      const y = ((i / w) | 0) * TILE;
+      if (x < view.x0 - 16 || x > view.x1 || y < view.y0 - 16 || y > view.y1) continue;
+      g.fillRect(x, y, TILE, TILE);
+      if (((i * 7) % 11) === 0) {
+        g.fillStyle = 'rgba(220,235,250,0.5)';
+        g.fillRect(x + ((t * 20 + i) % 12), y + 6, 4, 1);
+        g.fillStyle = 'rgba(60,110,170,0.6)';
+      }
+    }
+  }
+
+  private drawDragon(g: CanvasRenderingContext2D): void {
+    const d = this.sim.dragon;
+    if (!d) return;
+    const x = d.x * TILE;
+    const y = d.y * TILE;
+    const t = this.time;
+    const flap = Math.sin(t * 10);
+    // тень
+    g.fillStyle = 'rgba(0,0,0,0.3)';
+    g.beginPath();
+    g.ellipse(x, y + 40, 26, 10, 0, 0, Math.PI * 2);
+    g.fill();
+    g.save();
+    g.translate(x, y - 30);
+    if (d.dir === 1) g.scale(-1, 1);
+    // тело
+    g.fillStyle = '#5a1e1e';
+    g.beginPath();
+    g.ellipse(0, 0, 18, 7, 0, 0, Math.PI * 2);
+    g.fill();
+    // шея и голова
+    g.fillRect(14, -6, 10, 5);
+    g.fillRect(22, -10, 10, 7);
+    g.fillStyle = '#ffd040';
+    g.fillRect(29, -8, 2, 2);
+    // хвост
+    g.fillStyle = '#5a1e1e';
+    for (let k = 0; k < 6; k++) g.fillRect(-18 - k * 4, -2 + Math.sin(t * 6 + k) * 2, 5, 3);
+    // крылья
+    g.fillStyle = '#7a2a2a';
+    g.beginPath();
+    g.moveTo(-4, -2);
+    g.lineTo(-10, -22 - flap * 10);
+    g.lineTo(14, -16 - flap * 12);
+    g.lineTo(8, -2);
+    g.closePath();
+    g.fill();
+    g.beginPath();
+    g.moveTo(-4, 2);
+    g.lineTo(-10, 18 + flap * 6);
+    g.lineTo(14, 14 + flap * 8);
+    g.lineTo(8, 2);
+    g.closePath();
+    g.fill();
+    // пламя
+    if (Math.sin(t * 3) > 0.6) {
+      g.fillStyle = 'rgba(255,140,30,0.8)';
+      g.beginPath();
+      g.moveTo(32, -6);
+      g.lineTo(50, 4 + Math.random() * 6);
+      g.lineTo(44, 14);
+      g.closePath();
+      g.fill();
+    }
+    g.restore();
   }
 
   private fireParts: { x: number; y: number; vx: number; vy: number; life: number; max: number; size: number; kind: number }[] = [];

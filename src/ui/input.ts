@@ -98,6 +98,9 @@ export class Input {
       case 'KeyM':
         g.marketPanel.toggle();
         break;
+      case 'KeyG':
+        g.godPanel.toggle();
+        break;
       case 'KeyH':
         g.renderer.camera.panTo(g.sim.world.poi.cx * 16, g.sim.world.poi.cy * 16);
         break;

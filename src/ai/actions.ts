@@ -273,6 +273,7 @@ const work: ActionDef = {
     const { c, hour, sched } = ctx;
     if (c.workplace < 0 || !isWorkHour(sched, hour)) return 0;
     if (c.profession === Profession.Guard) return 0; // у стражи — патруль
+    if (ctx.sim.world.buildings[c.workplace].condition <= 0) return 0; // рабочее место в руинах
     if (c.actionData.dayOff === Math.floor(ctx.sim.tick / TICKS_PER_DAY)) return 0;
     let s = 50;
     if (hasTrait(c, Trait.Hardworking)) s += 10;
@@ -392,7 +393,7 @@ const PUBLIC_JOBS = new Set<BuildingType>([BuildingType.TownHall, BuildingType.B
 /** Производство за `ticks` тиков работы одного работника */
 export function produce(sim: Simulation, b: Building, c: Citizen, ticks: number): void {
   const r = RECIPES[b.type];
-  if (!r) return;
+  if (!r || b.condition <= 0) return;
   const hours = ticks / TICKS_PER_HOUR;
   // лесорубы в лесу валят брёвна, а не пилят доски
   if (b.type === BuildingType.Sawmill && c.actionData.outdoor) {

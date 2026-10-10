@@ -27,9 +27,57 @@ export function getBuildingSprite(b: Building, snow: boolean, damaged = 0): Buil
   const c = cache.get(key);
   if (c) return c;
   const s = buildSprite(b, snow);
-  if (damaged) applyDamage(s, b, damaged);
+  if (damaged >= 3) applyStage(s, b, damaged - 3);
+  else if (damaged) applyDamage(s, b, damaged);
   cache.set(key, s);
   return s;
+}
+
+/** Стадии стройки: 0 фундамент, 1 каркас, 2 стены, 3 крыша (почти готово) */
+function applyStage(s: BuildingSprite, b: Building, stage: number): void {
+  const g = ctx2d(s.canvas);
+  const W = s.canvas.width;
+  const H = s.canvas.height;
+  const footH = b.h * TILE;
+  const wallH = s.wallH;
+  s.lights = [];
+  s.chimney = null;
+  if (stage >= 3) {
+    // крыша: закрыть треть крыши «недостроенной» — снять правый край
+    g.clearRect(W * 0.65, 0, W * 0.35, H - wallH - 2);
+    g.fillStyle = '#5a3d22';
+    for (let x = Math.floor(W * 0.65); x < W; x += 4) g.fillRect(x, 4, 1, H - wallH - 6);
+    return;
+  }
+  g.clearRect(0, 0, W, H);
+  // площадка
+  g.fillStyle = '#8a7a66';
+  g.fillRect(1, H - footH - 2, W - 2, footH + 1);
+  g.fillStyle = '#6f6356';
+  for (let y = H - footH; y < H; y += 3) g.fillRect(1, y, W - 2, 1);
+  if (stage >= 1) {
+    // каркас: столбы и балки
+    g.fillStyle = '#7a5a3a';
+    for (let x = 2; x < W - 2; x += 8) g.fillRect(x, H - wallH - footH + 6, 2, wallH + footH - 7);
+    g.fillRect(1, H - wallH - footH + 6, W - 2, 2);
+    g.fillRect(1, H - wallH - 2, W - 2, 2);
+    for (let x = 6; x < W - 6; x += 16) {
+      for (let k = 0; k < 6; k++) g.fillRect(x + k, H - wallH - footH + 8 + k, 1, 1);
+    }
+  }
+  if (stage >= 2) {
+    // стены без крыши
+    g.fillStyle = rgb(MATERIAL_COLORS[b.material].wall);
+    g.fillRect(1, H - wallH, W - 2, wallH - 1);
+    g.fillStyle = rgb(MATERIAL_COLORS[b.material].wallDark);
+    for (let y = H - wallH + 3; y < H - 1; y += 3) g.fillRect(1, y, W - 2, 1);
+    g.fillStyle = 'rgba(0,0,0,0.18)';
+    g.fillRect(1, H - wallH - footH + 6, W - 2, footH - 6);
+  }
+  // леса, бочка, доски
+  g.fillStyle = '#a07a4a';
+  g.fillRect(2, H - 5, 10, 3);
+  g.fillRect(W - 12, H - 6, 9, 4);
 }
 
 /** Повреждения: 1 — закопчённое и обгоревшее, 2 — руины */

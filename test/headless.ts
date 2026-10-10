@@ -4,6 +4,7 @@ import { TICKS_PER_DAY, TICKS_PER_HOUR } from '../src/core/time';
 import { idx, isWalkableAt } from '../src/world/world';
 import { CitizenState } from '../src/sim/citizen';
 import type { CitySize } from '../src/world/generator';
+import { collectStats as collectStatsNow } from '../src/sim/stats';
 
 interface Case {
   seed: string;
@@ -89,7 +90,10 @@ for (const c of cases) {
   check(Math.abs(money1 - expected) < 0.5, `деньги не сходятся: было ${money0.toFixed(1)}, стало ${money1.toFixed(1)}, ожидалось ${expected.toFixed(1)}`);
   check(maxStuck < TICKS_PER_HOUR * 3, `житель ${maxStuckId} застрял на ${maxStuck} тиков`);
   if (pop0 > 0) check(popEnd >= pop0 * 0.9, `население упало с ${pop0} до ${popEnd}`);
-  const st = sim.stats;
+  const st = collectStatsNow(sim);
+  check(st.avgHunger >= 40, `город голодает: средняя сытость ${st.avgHunger.toFixed(0)}`);
+  check(st.avgHealth >= 70, `город болеет: среднее здоровье ${st.avgHealth.toFixed(0)}`);
+  for (const b of world.buildings) for (const [k, v] of Object.entries(b.storage)) check(Number.isFinite(v) && v >= -0.01, `запас ${k} в здании ${b.id} = ${v}`);
   console.log(`  население ${popEnd}, деньги ${money1.toFixed(0)}, ср. сытость ${st.avgHunger.toFixed(0)}, ср. здоровье ${st.avgHealth.toFixed(0)}, макс. застревание ${maxStuck} тиков`);
   console.log(`  событий в хронике: ${sim.chronicle.events.length}; A*: ${sim.pathfinder.stats.searches} поисков, ${sim.pathfinder.stats.cacheHits} из кэша`);
   for (const e of sim.chronicle.events.slice(-5)) console.log(`    · ${e.text}`);
