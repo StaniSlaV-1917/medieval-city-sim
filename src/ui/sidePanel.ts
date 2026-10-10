@@ -160,9 +160,10 @@ export class SidePanel {
     const residents = b.residents.filter((id) => sim.citizens[id]?.alive).map((id) => this.link(id)).join(', ');
     const workers = b.workers.filter((id) => sim.citizens[id]?.alive).map((id) => this.link(id)).join(', ');
     const storage = Object.entries(b.storage)
-      .filter(([, n]) => n > 0)
+      .filter(([k, n]) => n >= 0.5 && !k.startsWith('_') && k !== 'revenue' && k !== 'money')
       .map(([k, n]) => `${GOOD_NAMES[k] ?? k}: ${Math.round(n)}`)
       .join(', ');
+    const revenue = b.storage['revenue'] ? `<div>Выручка за всё время: ${Math.round(b.storage['revenue'])} монет</div>` : '';
     const owner = b.owner >= 0 && sim.citizens[b.owner]?.alive ? this.link(b.owner) : '—';
     this.el.innerHTML = `
       <button class="close" title="Закрыть (Esc)">✕</button>
@@ -175,14 +176,14 @@ export class SidePanel {
       </div>
       ${def.home ? `<div class="section"><h3>Жильцы (${b.residents.length}/${def.capacity})</h3>${residents || 'никто не живёт'}</div>` : ''}
       ${def.workers ? `<div class="section"><h3>Работники (${b.workers.length}/${def.workers})</h3>${workers || 'никого'}</div>` : ''}
-      <div class="section"><h3>Запасы</h3>${storage || 'пусто'}</div>`;
+      <div class="section"><h3>Запасы</h3>${storage || 'пусто'}${revenue}</div>`;
   }
 }
 
 const MATERIAL_NAMES: Record<string, string> = { wood: 'дерево', timber: 'фахверк', stone: 'камень', brick: 'кирпич' };
 const ROOF_NAMES: Record<string, string> = { thatch: 'солома', tile: 'черепица', slate: 'сланец', wood: 'дранка' };
 export const GOOD_NAMES: Record<string, string> = {
-  bread: 'хлеб', grain: 'зерно', flour: 'мука', meat: 'мясо', hide: 'шкуры', leather: 'кожа', wood: 'брёвна', planks: 'доски', stone: 'камень', ale: 'эль', tools: 'инструменты', cloth: 'ткань', money: 'деньги', food: 'еда',
+  bread: 'хлеб', grain: 'зерно', flour: 'мука', meat: 'мясо', hide: 'шкуры', leather: 'кожа', wood: 'брёвна', planks: 'доски', stone: 'камень', ale: 'эль', tools: 'инструменты', goods: 'изделия', cloth: 'ткань', money: 'деньги', food: 'еда',
 };
 
 function ageWord(n: number): string {

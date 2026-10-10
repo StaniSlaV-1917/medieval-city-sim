@@ -8,6 +8,7 @@ import { CitySize } from './world/generator';
 import { TILE } from './render/camera';
 import { SidePanel } from './ui/sidePanel';
 import { ChronicleView } from './ui/chronicleView';
+import { MarketPanel } from './ui/marketPanel';
 
 export class Game {
   sim: Simulation;
@@ -16,6 +17,7 @@ export class Game {
   input: Input;
   side: SidePanel;
   chronicleView: ChronicleView;
+  marketPanel: MarketPanel;
   speed = 1;
   paused = false;
   private acc = 0;
@@ -33,6 +35,7 @@ export class Game {
     this.hud = new Hud(ui, this);
     this.side = new SidePanel(ui, this);
     this.chronicleView = new ChronicleView(ui, this);
+    this.marketPanel = new MarketPanel(ui, this);
     this.input = new Input(this, canvas);
     this.resize();
     window.addEventListener('resize', () => this.resize());
@@ -165,6 +168,7 @@ export class Game {
     this.updateHover();
     this.side.update();
     this.chronicleView.update();
+    this.marketPanel.update();
     requestAnimationFrame((t) => this.frame(t));
   }
 

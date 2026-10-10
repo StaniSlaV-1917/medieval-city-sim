@@ -95,6 +95,9 @@ export class Input {
       case 'NumpadSubtract':
         g.renderer.camera.zoomAt(0.8, window.innerWidth / 2, window.innerHeight / 2);
         break;
+      case 'KeyM':
+        g.marketPanel.toggle();
+        break;
       case 'KeyH':
         g.renderer.camera.panTo(g.sim.world.poi.cx * 16, g.sim.world.poi.cy * 16);
         break;

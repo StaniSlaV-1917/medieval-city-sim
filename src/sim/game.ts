@@ -12,6 +12,8 @@ import { createPopulation } from './population';
 import { stepCitizens } from './systems';
 import { Stats, collectStats } from './stats';
 import type { Talk } from '../ai/conversation';
+import { Market } from '../economy/market';
+import { dailyTrade } from '../economy/trade';
 
 export interface SimOptions {
   seedText: string;
@@ -38,6 +40,9 @@ export class Simulation {
   stats: Stats;
   /** Текущие разговоры (ключ — id первого собеседника) */
   talks = new Map<number, Talk>();
+  market = new Market();
+  /** Дневные снимки для графиков */
+  history: { day: number; population: number; treasury: number; bread: number; avgHunger: number; avgMood: number; money: number }[] = [];
   /** Камера (центр в тайлах) — для LOD */
   focusX = 0;
   focusY = 0;
@@ -64,6 +69,7 @@ export class Simulation {
     this.focusY = this.world.poi.cy;
     createPopulation(this);
     this.stats = collectStats(this);
+    this.market.update(this);
     this.chronicle.log(this.tick, EventKind.Info, `Город Вальдмарк основан. Население — ${this.citizens.length} человек.`, this.world.poi.cx, this.world.poi.cy, [], 1);
   }
 
@@ -90,7 +96,15 @@ export class Simulation {
       this.spatial.insert(c.id, c.x, c.y);
     }
     stepCitizens(this);
+    if (this.tick % TICKS_PER_HOUR === 0) this.market.update(this);
+    if (this.tick % TICKS_PER_DAY === 0) {
+      this.market.newDay(this);
+      this.stats = collectStats(this);
+      this.history.push({ day: Math.floor(this.tick / TICKS_PER_DAY), population: this.stats.population, treasury: Math.round(this.treasury), bread: this.market.prices.bread, avgHunger: this.stats.avgHunger, avgMood: this.stats.avgMood, money: Math.round(this.totalMoney()) });
+      if (this.history.length > 400) this.history.shift();
+    }
     if (this.tick % TICKS_PER_DAY === 6 * TICKS_PER_HOUR) collectTaxes(this);
+    if (this.tick % TICKS_PER_DAY === 20 * TICKS_PER_HOUR) dailyTrade(this);
     if (this.tick % 600 === 0) this.stats = collectStats(this);
   }
 

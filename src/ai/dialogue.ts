@@ -3,7 +3,7 @@ import type { Simulation } from '../sim/game';
 import { Citizen, Profession, Trait, hasTrait, isChild, isElder, relation, fullName } from '../sim/citizen';
 import { Season, hourOf } from '../core/time';
 import { RNG } from '../core/rng';
-import { PRICES } from './actions';
+import { priceOf } from './actions';
 
 export type Topic = 'greet' | 'weather' | 'work' | 'family' | 'prices' | 'gossip' | 'memory' | 'needs' | 'tavern' | 'faith' | 'city' | 'kids' | 'bye' | 'quarrel' | 'flirt' | 'elder';
 
@@ -63,7 +63,7 @@ const FAMILY = {
   parents: ['Старик совсем плох стал.', 'Мать всё молится за нас.', 'Отец учил меня ремеслу.'],
 };
 
-const PRICE_TEMPL = ['Хлеб нынче по {bread}, куда это годится!', 'Эль в таверне — {ale} монета. Терпимо.', 'За {meal} монеты в таверне кормят до отвала.', 'Говорят, цены на муку растут.', 'На рынке всё дорожает, а жалованье то же.', 'Раньше за монету два каравая давали.'];
+const PRICE_TEMPL = ['Хлеб нынче по {bread}, куда это годится!', 'Эль в таверне — {ale}. Терпимо.', 'За {meal} монеты в таверне кормят до отвала.', 'Говорят, цены на муку растут.', 'На рынке всё дорожает, а жалованье то же.', 'Раньше за монету два каравая давали.', 'Мясо по {meat} — не укупишь.', 'Пекарь дерёт три шкуры.'];
 
 const GOSSIP = {
   praise: ['{other} — душа-человек.', 'Видел {otherAcc} вчера, кланялся.', 'Таких, как {other}, поискать.', '{other} мне в прошлом году помог, не забуду.', 'На {otherAcc} можно положиться.'],
@@ -145,7 +145,8 @@ function fill(t: string, ctx: LineCtx, other?: Citizen): string {
     const t = sim.world.buildings.filter((b) => b.type === 6);
     s = s.replace(/\{tavern\}/g, t.length ? t[Math.floor(ctx.rng.next() * t.length)].name : 'таверне');
   }
-  s = s.replace(/\{bread\}/g, String(PRICES.bread)).replace(/\{ale\}/g, String(PRICES.ale)).replace(/\{meal\}/g, String(PRICES.meal));
+  s = s.replace(/\{meat\}/g, String(priceOf(sim, 'meat')));
+  s = s.replace(/\{bread\}/g, String(priceOf(sim, 'bread'))).replace(/\{ale\}/g, String(priceOf(sim, 'ale'))).replace(/\{meal\}/g, String(priceOf(sim, 'bread') + priceOf(sim, 'meat')));
   return s;
 }
 

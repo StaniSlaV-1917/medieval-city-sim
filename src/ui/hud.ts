@@ -38,6 +38,12 @@ export class Hud {
       speeds.appendChild(b);
       this.speedBtns.push(b);
     }
+    const mb = document.createElement('button');
+    mb.className = 'btn market';
+    mb.textContent = 'Рынок';
+    mb.title = 'Цены, запасы и казна (M)';
+    mb.addEventListener('click', () => game.marketPanel.toggle());
+    hud.appendChild(mb);
     const tl = document.createElement('div');
     tl.id = 'topleft';
     tl.className = 'panel';
@@ -50,7 +56,7 @@ export class Hud {
     const help = document.createElement('div');
     help.id = 'help';
     help.className = 'panel';
-    help.innerHTML = `<kbd>WASD</kbd> камера · <kbd>колесо</kbd> зум · <kbd>пробел</kbd> пауза · <kbd>1</kbd>–<kbd>4</kbd> скорость · <kbd>F</kbd> следовать · <kbd>Esc</kbd> снять`;
+    help.innerHTML = `<kbd>WASD</kbd> камера · <kbd>колесо</kbd> зум · <kbd>пробел</kbd> пауза · <kbd>1</kbd>–<kbd>4</kbd> скорость · <kbd>F</kbd> следовать · <kbd>M</kbd> рынок · <kbd>Esc</kbd> снять`;
     root.appendChild(help);
   }
 

@@ -322,6 +322,32 @@ export function createPopulation(sim: Simulation): void {
   }
   // Еда в домах
   for (const h of households) h.home.storage['bread'] = rng.int(2, 6) + h.members.length;
+  // Стартовые запасы и капитал предприятий
+  const INIT: Partial<Record<BuildingType, Record<string, number>>> = {
+    [BuildingType.Farm]: { grain: 45, meat: 6, hide: 3, tools: 1 },
+    [BuildingType.Mill]: { grain: 25, flour: 30 },
+    [BuildingType.Bakery]: { flour: 25, bread: 30 },
+    [BuildingType.Butcher]: { meat: 12 },
+    [BuildingType.Tavern]: { ale: 30, bread: 10, meat: 3, grain: 10 },
+    [BuildingType.Sawmill]: { wood: 20, planks: 15, tools: 1 },
+    [BuildingType.Quarry]: { stone: 15, tools: 1 },
+    [BuildingType.Smithy]: { wood: 8, tools: 6 },
+    [BuildingType.Carpenter]: { planks: 10, tools: 1, goods: 2 },
+    [BuildingType.Mason]: { stone: 10, tools: 1 },
+    [BuildingType.Tannery]: { hide: 6, leather: 4 },
+    [BuildingType.MarketStall]: { bread: 10, meat: 3, ale: 5 },
+    [BuildingType.Warehouse]: { grain: 40, flour: 20, planks: 10, stone: 10 },
+    [BuildingType.Merchant]: { goods: 4, tools: 2, leather: 3 },
+  };
+  for (const b of world.buildings) {
+    const init = INIT[b.type];
+    if (!init) continue;
+    for (const [g, n] of Object.entries(init)) b.storage[g] = (b.storage[g] ?? 0) + n;
+    if (b.owner >= 0) {
+      const o = sim.citizens[b.owner];
+      if (o && o.alive) o.money += b.type === BuildingType.Farm ? 50 : b.type === BuildingType.Warehouse ? 250 : 110;
+    }
+  }
   // Казна
   sim.treasury = 500 + homes.length * 4;
   // Биография: рождение
