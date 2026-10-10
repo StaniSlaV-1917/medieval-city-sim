@@ -13,6 +13,7 @@ import { makeCanvas, ctx2d, hash2 } from './atlas';
 import { Citizen, CitizenState } from '../sim/citizen';
 import { getCitizenSprite } from './citizenSprites';
 import { drawBubbles } from './bubbles';
+import { drawWeather } from './weather';
 
 interface Drawable {
   y: number; // ключ сортировки (мировые px)
@@ -117,13 +118,16 @@ export class Renderer {
         g.strokeRect(b.x * TILE + 0.5, b.y * TILE + 0.5, b.w * TILE - 1, b.h * TILE - 1);
       }
     }
-    // Дым
+    // Дым и огонь
     this.updateSmoke(dt, view);
     this.drawSmoke(g);
+    this.drawFires(g, dt);
     // Ночное освещение
     this.drawLighting(light, view, z, ox, oy);
-    // Пузыри речи
+    // Погода
     g.setTransform(1, 0, 0, 1, 0, 0);
+    drawWeather(g, this, sim, dt);
+    // Пузыри речи
     drawBubbles(g, this, sim);
   }
 
@@ -172,8 +176,16 @@ export class Renderer {
 
   private drawBuilding(g: CanvasRenderingContext2D, id: number, snow: boolean): void {
     const b = this.sim.world.buildings[id];
-    const s = getBuildingSprite(b, snow);
+    const damaged = b.condition <= 0 ? 2 : b.condition < 0.6 ? 1 : 0;
+    const s = getBuildingSprite(b, snow, damaged);
     g.drawImage(s.canvas, b.x * TILE + s.ox, b.y * TILE + s.oy);
+    if (b.underConstruction !== undefined && b.underConstruction < 1) {
+      // леса стройки
+      g.fillStyle = 'rgba(120,90,50,0.55)';
+      g.fillRect(b.x * TILE, b.y * TILE - 6, b.w * TILE, 4);
+      g.fillStyle = '#ffe070';
+      g.fillRect(b.x * TILE, b.y * TILE - 6, b.w * TILE * b.underConstruction, 4);
+    }
     if (this.selectedBuilding === id) {
       g.globalAlpha = 0.25;
       g.fillStyle = '#ffe070';
@@ -300,6 +312,59 @@ export class Renderer {
     g.globalAlpha = 1;
   }
 
+  private fireParts: { x: number; y: number; vx: number; vy: number; life: number; max: number; size: number; kind: number }[] = [];
+  private drawFires(g: CanvasRenderingContext2D, dt: number): void {
+    const sim = this.sim;
+    const parts = this.fireParts;
+    for (const f of sim.fires) {
+      const b = sim.world.buildings[f.building];
+      if (!b) continue;
+      const n = Math.ceil((0.25 + f.intensity) * b.w * b.h * dt * 40);
+      for (let k = 0; k < n && parts.length < 1500; k++) {
+        const kind = Math.random() < 0.3 ? 1 : 0; // 1 — дым
+        parts.push({
+          x: (b.x + Math.random() * b.w) * TILE,
+          y: (b.y + Math.random() * b.h) * TILE - (kind ? 10 : 2),
+          vx: (Math.random() - 0.5) * 6 + Math.cos(sim.weather.windDir) * sim.weather.wind * 10,
+          vy: -20 - Math.random() * 25,
+          life: 0,
+          max: kind ? 2 + Math.random() * 2 : 0.4 + Math.random() * 0.6,
+          size: kind ? 2 + Math.random() * 3 : 2 + Math.random() * 3 * (0.4 + f.intensity),
+          kind,
+        });
+      }
+      // свечение
+      g.globalAlpha = 0.25 * f.intensity;
+      g.fillStyle = '#ff8a2a';
+      g.fillRect(b.x * TILE - 4, b.y * TILE - 20, b.w * TILE + 8, b.h * TILE + 24);
+      g.globalAlpha = 1;
+    }
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const p = parts[i];
+      p.life += dt;
+      if (p.life > p.max) {
+        parts[i] = parts[parts.length - 1];
+        parts.pop();
+        continue;
+      }
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      const t = p.life / p.max;
+      if (p.kind) {
+        g.globalAlpha = (1 - t) * 0.5;
+        g.fillStyle = '#3a3634';
+        g.beginPath();
+        g.arc(p.x, p.y, p.size + t * 4, 0, Math.PI * 2);
+        g.fill();
+      } else {
+        g.globalAlpha = 1 - t * 0.7;
+        g.fillStyle = t < 0.3 ? '#fff2a0' : t < 0.6 ? '#ffb030' : '#e0401a';
+        g.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+      }
+    }
+    g.globalAlpha = 1;
+  }
+
   // ---------------------------------------------------------------- Освещение
 
   private drawLighting(light: number, view: { x0: number; y0: number; x1: number; y1: number }, z: number, ox: number, oy: number): void {
@@ -340,6 +405,17 @@ export class Renderer {
         glow.push({ x: bx + l.x, y: by + l.y, r: r * 0.7, warm: l.warm });
         count++;
       }
+    }
+    // Пожары светят
+    for (const f of this.sim.fires) {
+      const b = world.buildings[f.building];
+      if (!b) continue;
+      const r = 60 * f.intensity * flicker;
+      const fx = (b.x + b.w / 2) * TILE;
+      const fy = (b.y + b.h / 2) * TILE;
+      lg.globalAlpha = 0.95 * darkness;
+      lg.drawImage(ls, fx - r, fy - r, r * 2, r * 2);
+      glow.push({ x: fx, y: fy, r: r * 0.8, warm: 2 });
     }
     // Факелы и фонари
     for (const p of world.props) {

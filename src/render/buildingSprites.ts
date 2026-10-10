@@ -27,8 +27,48 @@ export function getBuildingSprite(b: Building, snow: boolean, damaged = 0): Buil
   const c = cache.get(key);
   if (c) return c;
   const s = buildSprite(b, snow);
+  if (damaged) applyDamage(s, b, damaged);
   cache.set(key, s);
   return s;
+}
+
+/** Повреждения: 1 — закопчённое и обгоревшее, 2 — руины */
+function applyDamage(s: BuildingSprite, b: Building, level: number): void {
+  const g = ctx2d(s.canvas);
+  const W = s.canvas.width;
+  const H = s.canvas.height;
+  if (level === 1) {
+    g.fillStyle = 'rgba(20,16,12,0.45)';
+    g.fillRect(0, 0, W, H);
+    // прорехи в крыше
+    for (let k = 0; k < 6; k++) {
+      const x = (hash2(b.id, k, 11) * (W - 8)) | 0;
+      const y = (hash2(b.id, k, 12) * (H - s.wallH - 8)) | 0;
+      g.clearRect(x, y, 4 + ((hash2(b.id, k, 13) * 6) | 0), 3 + ((hash2(b.id, k, 14) * 4) | 0));
+    }
+    s.lights = [];
+    return;
+  }
+  // руины: оставить только низ стен + завалы
+  g.clearRect(0, 0, W, H - Math.min(10, s.wallH));
+  g.fillStyle = 'rgba(0,0,0,0.5)';
+  g.fillRect(0, H - Math.min(10, s.wallH), W, Math.min(10, s.wallH));
+  const footH = b.h * TILE;
+  for (let k = 0; k < b.w * b.h * 3; k++) {
+    const x = (hash2(b.id, k, 21) * (W - 6)) | 0;
+    const y = H - footH - 6 + ((hash2(b.id, k, 22) * (footH + 2)) | 0);
+    const dark = hash2(b.id, k, 23) > 0.5;
+    g.fillStyle = dark ? '#3a332c' : '#6a5f52';
+    g.fillRect(x, y, 3 + ((hash2(b.id, k, 24) * 5) | 0), 2 + ((hash2(b.id, k, 25) * 3) | 0));
+  }
+  // обугленные балки
+  g.fillStyle = '#1e1a16';
+  for (let k = 0; k < 3; k++) {
+    const x = 4 + ((hash2(b.id, k, 31) * (W - 10)) | 0);
+    g.fillRect(x, H - footH - 8, 2, footH - 2 + ((hash2(b.id, k, 32) * 8) | 0));
+  }
+  s.lights = [];
+  s.chimney = null;
 }
 
 function wallHeightFor(b: Building): number {

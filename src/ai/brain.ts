@@ -3,6 +3,7 @@ import type { Simulation } from '../sim/game';
 import { Citizen, CitizenState, Trait, hasTrait } from '../sim/citizen';
 import { ACTIONS, ActionCtx, ActionDef } from './actions';
 import '../ai/orders';
+import { continueFirefight } from '../sim/fire';
 import { scheduleOf } from '../sim/schedule';
 import { hourOf } from '../core/time';
 
@@ -16,6 +17,7 @@ export function makeCtx(sim: Simulation, c: Citizen): ActionCtx {
 export function think(sim: Simulation, c: Citizen): void {
   if (!ORDER.length) ORDER = Object.values(ACTIONS);
   const ctx = makeCtx(sim, c);
+  if (c.action === 'firefight' && continueFirefight(sim, c)) return;
   if (c.order) {
     c.action = 'order';
     if (!ACTIONS.order.start(ctx)) c.order = null;

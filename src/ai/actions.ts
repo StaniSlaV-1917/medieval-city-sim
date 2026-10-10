@@ -893,6 +893,8 @@ const stroll: ActionDef = {
     if (c.needs.energy < 20) return 0;
     let s = 6 + (100 - c.needs.fun) * 0.22 + (100 - c.needs.social) * 0.15;
     if (hour >= 16 && hour < 21) s += 10;
+    s -= ctx.sim.weather.rain * 18 + (ctx.sim.season === 3 ? 8 : 0);
+    if (c.flags & 4) s -= 15;
     if (hasTrait(c, Trait.Curious)) s += 8;
     if (hasTrait(c, Trait.Gloomy)) s -= 6;
     if (hasTrait(c, Trait.Talkative)) s += 5;
@@ -945,7 +947,8 @@ const homeRest: ActionDef = {
     const home = homeOf(ctx);
     if (!home) return 0;
     if (isSleepHour(sched, hour)) return 0;
-    let s = 7;
+    let s = 7 + ctx.sim.weather.rain * 14 + (ctx.sim.season === 3 ? 6 : 0);
+    if (c.flags & 4) s += 20; // болен — лежит дома
     if (c.profession === Profession.Housewife && hour >= 8 && hour < 18) s += 22;
     if (hour >= 20) s += 18;
     if (hour >= 12 && hour < 14) s += 6;

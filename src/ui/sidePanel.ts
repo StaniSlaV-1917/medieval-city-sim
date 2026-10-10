@@ -5,6 +5,8 @@ import { formatDate } from '../core/time';
 import { getCitizenSprite } from '../render/citizenSprites';
 import { ACTION_LABELS } from '../ai/actions';
 import { CRIME_LABELS } from '../sim/crime';
+import { HEALTH_LABELS } from '../sim/health';
+import { FIRE_LABELS } from '../sim/fire';
 import { moodWord } from '../sim/needs';
 import { ORDER_DEFS, ORDER_CATEGORIES, giveOrder, OrderDef } from '../ai/orders';
 import { GOODS, GOOD_INFO } from '../economy/goods';
@@ -95,7 +97,7 @@ export class SidePanel {
   }
 
   citizenTooltip(c: Citizen): string {
-    const act = c.state === 3 ? 'беседует' : (ACTION_LABELS[c.action] ?? CRIME_LABELS[c.action] ?? '');
+    const act = c.state === 3 ? 'беседует' : (ACTION_LABELS[c.action] ?? CRIME_LABELS[c.action] ?? HEALTH_LABELS[c.action] ?? FIRE_LABELS[c.action] ?? '');
     return `<b>${fullName(c)}</b>, ${c.age} · ${professionName(c)}<br>${act} · ${moodWord(c.mood)}<br><i>${c.thought || ''}</i>`;
   }
 
@@ -152,7 +154,7 @@ export class SidePanel {
       <button class="close" title="Закрыть (Esc)">✕</button>
       ${portrait}
       <h2>${fullName(c)}</h2>
-      <div class="sub">${professionName(c)}, ${c.age} ${ageWord(c.age)} · ${c.state === 3 ? 'беседует' : (ACTION_LABELS[c.action] ?? CRIME_LABELS[c.action] ?? '')} · ${moodWord(c.mood)}${c.jailedUntil > this.game.sim.tick ? ' · в тюрьме' : ''}${c.flags & 2 ? ' · в розыске' : ''}${c.flags & 8 ? ' · ранен' : ''}</div>
+      <div class="sub">${professionName(c)}, ${c.age} ${ageWord(c.age)} · ${c.state === 3 ? 'беседует' : (ACTION_LABELS[c.action] ?? CRIME_LABELS[c.action] ?? HEALTH_LABELS[c.action] ?? FIRE_LABELS[c.action] ?? '')} · ${moodWord(c.mood)}${c.jailedUntil > this.game.sim.tick ? ' · в тюрьме' : ''}${c.flags & 2 ? ' · в розыске' : ''}${c.flags & 8 ? ' · ранен' : ''}${c.flags & 4 ? ' · болен' : ''}</div>
       <div class="thought">«${c.thought || '…'}»</div>
       <div class="traits">${traits}</div>
       <div class="section"><h3>Потребности</h3>${needs}</div>

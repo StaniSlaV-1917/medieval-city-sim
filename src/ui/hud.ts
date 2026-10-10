@@ -1,6 +1,7 @@
 import type { Game } from '../main';
 import { formatClock, formatDate } from '../core/time';
 import { plural } from '../core/math';
+import { weatherText } from '../sim/weather';
 
 export class Hud {
   root: HTMLElement;
@@ -64,7 +65,7 @@ export class Hud {
     const sim = this.game.sim;
     const t = sim.tick;
     this.clockEl.textContent = formatClock(t);
-    this.dateEl.textContent = formatDate(t);
+    this.dateEl.textContent = `${formatDate(t)} · ${weatherText(sim.weather, sim.season)}, ${Math.round(sim.weather.temp)}°`;
     const n = sim.stats.population;
     this.popEl.textContent = `${n} ${plural(n, 'житель', 'жителя', 'жителей')}`;
     const sp = this.game.paused ? 0 : this.game.speed;

@@ -140,6 +140,10 @@ export interface Building {
   district: District;
   /** Светится ли ночью (окна) */
   lit: boolean;
+  /** Стройка: доля готовности 0..1 (undefined — построено) */
+  underConstruction?: number;
+  /** Стадия стройки: 0 фундамент, 1 каркас, 2 стены, 3 крыша */
+  buildStage?: number;
 }
 
 export const enum District {

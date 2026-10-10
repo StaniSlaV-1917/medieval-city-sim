@@ -17,6 +17,10 @@ import type { Alarm, CrimeRecord } from './crime';
 import type { ActionCtx } from '../ai/actions';
 import type { Order } from './citizen';
 import { dailyTrade } from '../economy/trade';
+import { Weather, createWeather, updateWeather } from './weather';
+import { Fire, igniteBuilding, updateFires } from './fire';
+import { updateHealth, updateFunerals } from './health';
+import { Building, BUILDING_DEFS } from '../world/buildings';
 
 export interface SimOptions {
   seedText: string;
@@ -60,8 +64,17 @@ export class Simulation {
   focusY = 0;
   /** Сезон для отслеживания смены */
   private lastSeason: Season;
-  /** Погода (расширяется в фазе 6) */
-  weather = { rain: 0, fog: 0, snow: 0, wind: 0.3, temp: 15 };
+  weather: Weather = createWeather();
+  fires: Fire[] = [];
+  funerals: { dead: number; tick: number; mourners: number[]; phase: number }[] = [];
+  deaths = 0;
+  sickCount = 0;
+  /** Множители бедствий (божественные силы) */
+  fireRiskMul = 1;
+  epidemicMul = 1;
+  lightningFlash = 0;
+  igniteBuilding: ((id: number, cause: string, intensity?: number) => boolean) | null = null;
+  onBuildingDestroyed: ((b: Building, cause: string) => void) | null = null;
   /** Счётчики для инвариантов */
   moneyCreated = 0; // деньги, созданные системой (внешняя торговля, караваны, бог)
   moneyDestroyed = 0;
@@ -82,6 +95,7 @@ export class Simulation {
     createPopulation(this);
     this.stats = collectStats(this);
     this.market.update(this);
+    this.igniteBuilding = (id, cause, intensity) => igniteBuilding(this, id, cause, intensity);
     this.chronicle.log(this.tick, EventKind.Info, `Город Вальдмарк основан. Население — ${this.citizens.length} человек.`, this.world.poi.cx, this.world.poi.cy, [], 1);
   }
 
@@ -108,6 +122,10 @@ export class Simulation {
       this.spatial.insert(c.id, c.x, c.y);
     }
     stepCitizens(this);
+    updateWeather(this);
+    updateFires(this);
+    updateHealth(this);
+    updateFunerals(this);
     if (this.tick % TICKS_PER_HOUR === 0) this.market.update(this);
     if (this.tick % TICKS_PER_DAY === 0) {
       this.market.newDay(this);
@@ -123,6 +141,10 @@ export class Simulation {
   private onSeasonChange(season: Season): void {
     const names = ['Пришла весна. Поля зеленеют.', 'Наступило лето. Дни стали длинными.', 'Пришла осень. Время жатвы.', 'Настала зима. Реку сковывает лёд.'];
     this.chronicle.log(this.tick, EventKind.Info, names[season], this.world.poi.cx, this.world.poi.cy, [], 0.5);
+  }
+
+  buildingDefName(b: Building): string {
+    return BUILDING_DEFS[b.type].name;
   }
 
   citizen(id: number): Citizen | null {
