@@ -96,10 +96,16 @@ export class Input {
         g.renderer.camera.zoomAt(0.8, window.innerWidth / 2, window.innerHeight / 2);
         break;
       case 'KeyM':
-        g.marketPanel.toggle();
+        g.showPanel('market');
         break;
       case 'KeyG':
-        g.godPanel.toggle();
+        g.showPanel('god');
+        break;
+      case 'KeyT':
+        g.showPanel('stats');
+        break;
+      case 'KeyO':
+        g.cycleOverlay();
         break;
       case 'KeyH':
         g.renderer.camera.panTo(g.sim.world.poi.cx * 16, g.sim.world.poi.cy * 16);

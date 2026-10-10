@@ -10,6 +10,10 @@ import { SidePanel } from './ui/sidePanel';
 import { ChronicleView } from './ui/chronicleView';
 import { MarketPanel } from './ui/marketPanel';
 import { GodPanel } from './ui/godPanel';
+import { StatsPanel } from './ui/statsPanel';
+import { Minimap } from './ui/minimap';
+import { serialize, deserialize, saveToDb, loadFromDb, downloadJson, pickJsonFile } from './save/save';
+import { OVERLAY_NAMES } from './render/overlays';
 import type { OrderDef } from './ai/orders';
 
 export class Game {
@@ -21,6 +25,11 @@ export class Game {
   chronicleView: ChronicleView;
   marketPanel: MarketPanel;
   godPanel: GodPanel;
+  statsPanel: StatsPanel;
+  minimap: Minimap;
+  private lastAutosave = 0;
+  private lastAutosaveDay = -1;
+  autosaveStatus = '';
   godTargeting: string | null = null;
   speed = 1;
   paused = false;
@@ -33,16 +42,18 @@ export class Game {
   private fpsCount = 0;
   private running = true;
 
-  constructor(seed: string, size: CitySize) {
+  constructor(seed: string, size: CitySize, loaded?: Simulation) {
     const canvas = document.getElementById('game') as HTMLCanvasElement;
     const ui = document.getElementById('ui') as HTMLElement;
-    this.sim = new Simulation({ seedText: seed, size });
+    this.sim = loaded ?? new Simulation({ seedText: seed, size });
     this.renderer = new Renderer(canvas, this.sim);
     this.hud = new Hud(ui, this);
     this.side = new SidePanel(ui, this);
     this.chronicleView = new ChronicleView(ui, this);
     this.marketPanel = new MarketPanel(ui, this);
     this.godPanel = new GodPanel(ui, this);
+    this.statsPanel = new StatsPanel(ui, this);
+    this.minimap = new Minimap(ui, this);
     this.input = new Input(this, canvas);
     this.resize();
     window.addEventListener('resize', () => this.resize());
@@ -210,7 +221,73 @@ export class Game {
     this.chronicleView.update();
     this.marketPanel.update();
     this.godPanel.update();
+    this.statsPanel.update();
+    this.minimap.update();
+    this.autosave(now);
     requestAnimationFrame((t) => this.frame(t));
+  }
+
+  private autosave(now: number): void {
+    const day = Math.floor(this.sim.tick / 7200);
+    const dueByDay = day !== this.lastAutosaveDay && this.sim.tick % 7200 < 50;
+    const dueByTime = now - this.lastAutosave > 120000;
+    if (!dueByDay && !dueByTime) return;
+    if (this.lastAutosave === 0 && !dueByDay) {
+      this.lastAutosave = now;
+      return;
+    }
+    this.lastAutosave = now;
+    this.lastAutosaveDay = day;
+    this.saveGame('autosave').catch(() => void 0);
+  }
+
+  async saveGame(key = 'autosave'): Promise<void> {
+    try {
+      const json = serialize(this.sim);
+      await saveToDb(key, json);
+      this.autosaveStatus = `сохранено ${new Date().toLocaleTimeString('ru-RU')}`;
+    } catch (e) {
+      this.autosaveStatus = 'не удалось сохранить';
+      console.error(e);
+    }
+  }
+
+  exportSave(): void {
+    const json = serialize(this.sim);
+    downloadJson(json, `waldmark-${this.sim.seedText}-день${Math.floor(this.sim.tick / 7200)}.json`);
+  }
+
+  async importSave(): Promise<void> {
+    const json = await pickJsonFile();
+    if (!json) return;
+    try {
+      const sim = deserialize(json);
+      this.replaceSim(sim);
+    } catch (e) {
+      alert('Не удалось загрузить сохранение: ' + (e as Error).message);
+    }
+  }
+
+  replaceSim(sim: Simulation): void {
+    this.running = false;
+    const ui = document.getElementById('ui') as HTMLElement;
+    ui.innerHTML = '';
+    (window as unknown as { game: Game }).game = new Game(sim.seedText, sim.size, sim);
+  }
+
+  /** Открыть одну из левых панелей, закрыв остальные */
+  showPanel(which: 'market' | 'god' | 'stats'): void {
+    const panels = { market: this.marketPanel, god: this.godPanel, stats: this.statsPanel };
+    for (const [k, p] of Object.entries(panels)) {
+      if (k === which) p.toggle();
+      else p.toggle(false);
+    }
+  }
+
+  cycleOverlay(): void {
+    const order: ('none' | 'crime' | 'fire' | 'wealth')[] = ['none', 'crime', 'fire', 'wealth'];
+    const i = order.indexOf(this.renderer.showOverlay);
+    this.renderer.showOverlay = order[(i + 1) % order.length];
   }
 
   private updateHover(): void {
@@ -233,6 +310,37 @@ export class Game {
 }
 
 const ui = document.getElementById('ui') as HTMLElement;
-showStartScreen(ui, (seed, size) => {
-  (window as unknown as { game: Game }).game = new Game(seed, size);
+loadFromDb('autosave').then((saved) => {
+  showStartScreen(
+    ui,
+    (seed, size) => {
+      (window as unknown as { game: Game }).game = new Game(seed, size);
+    },
+    saved
+      ? {
+          savedAt: saved.savedAt,
+          load: () => {
+            try {
+              const sim = deserialize(saved.json);
+              (window as unknown as { game: Game }).game = new Game(sim.seedText, sim.size, sim);
+            } catch (e) {
+              alert('Сохранение повреждено: ' + (e as Error).message);
+            }
+          },
+        }
+      : null,
+    async () => {
+      const json = await pickJsonFile();
+      if (!json) return false;
+      try {
+        const sim = deserialize(json);
+        (window as unknown as { game: Game }).game = new Game(sim.seedText, sim.size, sim);
+        return true;
+      } catch (e) {
+        alert('Не удалось загрузить файл: ' + (e as Error).message);
+        return false;
+      }
+    },
+  );
 });
+export { OVERLAY_NAMES };

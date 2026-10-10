@@ -15,6 +15,7 @@ import { getCitizenSprite } from './citizenSprites';
 import { drawBubbles } from './bubbles';
 import { drawWeather } from './weather';
 import { getAnimalSprite } from './animalSprites';
+import { drawOverlay } from './overlays';
 import { AnimalKind } from '../sim/animals';
 
 interface Drawable {
@@ -134,6 +135,7 @@ export class Renderer {
     this.drawSmoke(g);
     this.drawFires(g, dt);
     this.drawDragon(g);
+    drawOverlay(g, this, sim, view);
     // Ночное освещение
     this.drawLighting(light, view, z, ox, oy);
     // Погода

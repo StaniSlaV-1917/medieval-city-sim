@@ -2,7 +2,7 @@ import { CitySize, CITY_SIZES } from '../world/generator';
 
 const RANDOM_WORDS = ['Вальдмарк', 'Хольцбург', 'Штайнфурт', 'Розенау', 'Айзенберг', 'Грюнвальд', 'Линденхоф', 'Зильберталь', 'Фалькенштайн', 'Кройцбург', 'Мондорф', 'Хиршфельд'];
 
-export function showStartScreen(root: HTMLElement, onStart: (seed: string, size: CitySize) => void): void {
+export function showStartScreen(root: HTMLElement, onStart: (seed: string, size: CitySize) => void, saved: { savedAt: number; load: () => void } | null = null, onImport: (() => Promise<boolean>) | null = null): void {
   const div = document.createElement('div');
   div.id = 'start';
   div.innerHTML = `
@@ -19,6 +19,10 @@ export function showStartScreen(root: HTMLElement, onStart: (seed: string, size:
         ${(Object.keys(CITY_SIZES) as CitySize[]).map((k) => `<option value="${k}" ${k === 'medium' ? 'selected' : ''}>${CITY_SIZES[k].name} (${CITY_SIZES[k].tiles}×${CITY_SIZES[k].tiles})</option>`).join('')}
       </select>
       <div style="margin-top:18px"><button class="btn primary" id="go" style="width:100%;font-size:18px">Основать город</button></div>
+      <div class="row" style="margin-top:8px">
+        ${saved ? `<button class="btn" id="cont">Продолжить (автосейв ${new Date(saved.savedAt).toLocaleString('ru-RU')})</button>` : ''}
+        <button class="btn" id="imp" style="flex:0 0 auto">Загрузить из файла…</button>
+      </div>
       <div class="hint">
         <kbd>WASD</kbd>/<kbd>стрелки</kbd> или перетаскивание мышью — камера, <kbd>колесо</kbd> — зум,
         <kbd>пробел</kbd> — пауза, <kbd>1</kbd>–<kbd>4</kbd> — скорость, <kbd>F</kbd> — следовать за выбранным, <kbd>Esc</kbd> — снять выделение.
@@ -41,6 +45,13 @@ export function showStartScreen(root: HTMLElement, onStart: (seed: string, size:
     onStart(seed, size);
   };
   div.querySelector('#go')!.addEventListener('click', go);
+  div.querySelector('#cont')?.addEventListener('click', () => {
+    div.remove();
+    saved!.load();
+  });
+  div.querySelector('#imp')!.addEventListener('click', async () => {
+    if (onImport && (await onImport())) div.remove();
+  });
   seedInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') go();
   });

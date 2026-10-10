@@ -7,16 +7,26 @@ export class ChronicleView {
   private list: HTMLElement;
   private game: Game;
   private shown = 0;
+  private filter = 'all';
 
   constructor(root: HTMLElement, game: Game) {
     this.game = game;
     this.el = document.createElement('div');
     this.el.id = 'chron';
     this.el.className = 'panel';
-    this.el.innerHTML = `<h3>Хроника города</h3><div class="list"></div>`;
+    this.el.innerHTML = `<h3>Хроника города</h3><div class="filters"><button class="btn active" data-f="all">Все</button><button class="btn" data-f="2">Преступления</button><button class="btn" data-f="1">Люди</button><button class="btn" data-f="3">Бедствия</button><button class="btn" data-f="4">Торговля</button></div><div class="list"></div>`;
     root.appendChild(this.el);
     this.list = this.el.querySelector('.list')!;
     this.el.addEventListener('click', (e) => {
+      const fb = (e.target as HTMLElement).closest('[data-f]') as HTMLElement | null;
+      if (fb) {
+        this.filter = fb.getAttribute('data-f')!;
+        this.el.querySelectorAll('[data-f]').forEach((b) => b.classList.toggle('active', b === fb));
+        this.list.innerHTML = '';
+        this.shown = 0;
+        this.update();
+        return;
+      }
       const t = (e.target as HTMLElement).closest('.ev') as HTMLElement | null;
       if (!t) return;
       const x = Number(t.getAttribute('data-x'));
@@ -31,8 +41,11 @@ export class ChronicleView {
     const events = this.game.sim.chronicle.events;
     if (events.length === this.shown) return;
     // добавить новые
-    const start = Math.max(0, this.shown);
-    for (let i = start; i < events.length; i++) this.add(events[i]);
+    const start = Math.max(0, this.shown, events.length - 80);
+    for (let i = start; i < events.length; i++) {
+      const e = events[i];
+      if (this.filter === 'all' || String(e.kind) === this.filter || (this.filter === '1' && (e.kind === 5 || e.kind === 6 || e.kind === 7))) this.add(e);
+    }
     this.shown = events.length;
     while (this.list.children.length > 60) this.list.removeChild(this.list.firstChild!);
     this.list.scrollTop = this.list.scrollHeight;

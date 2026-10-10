@@ -34,6 +34,8 @@ export interface SimOptions {
   size: CitySize;
   /** Стартовое время (тик) */
   startHour?: number;
+  /** Не создавать население (для загрузки сохранения) */
+  skipPopulation?: boolean;
 }
 
 export class Simulation {
@@ -65,7 +67,7 @@ export class Simulation {
   /** Ожидающая свадьба (для церемонии) */
   pendingWedding: { a: number; b: number; tick: number } | null = null;
   /** Дневные снимки для графиков */
-  history: { day: number; population: number; treasury: number; bread: number; avgHunger: number; avgMood: number; money: number }[] = [];
+  history: { day: number; population: number; treasury: number; bread: number; avgHunger: number; avgMood: number; money: number; crimes: number; health: number; unrest: number }[] = [];
   /** Камера (центр в тайлах) — для LOD */
   focusX = 0;
   focusY = 0;
@@ -118,13 +120,15 @@ export class Simulation {
     this.lastSeason = seasonOf(this.tick);
     this.focusX = this.world.poi.cx;
     this.focusY = this.world.poi.cy;
-    createPopulation(this);
-    this.stats = collectStats(this);
-    this.market.update(this);
     this.igniteBuilding = (id, cause, intensity) => igniteBuilding(this, id, cause, intensity);
     this.onBuildingDestroyed = (b, cause) => onBuildingDestroyed(this, b, cause);
-    createAnimals(this);
-    this.chronicle.log(this.tick, EventKind.Info, `Город Вальдмарк основан. Население — ${this.citizens.length} человек.`, this.world.poi.cx, this.world.poi.cy, [], 1);
+    if (!opts.skipPopulation) {
+      createPopulation(this);
+      createAnimals(this);
+      this.stats = collectStats(this);
+      this.market.update(this);
+      this.chronicle.log(this.tick, EventKind.Info, `Город Вальдмарк основан. Население — ${this.citizens.length} человек.`, this.world.poi.cx, this.world.poi.cy, [], 1);
+    } else this.stats = collectStats(this);
   }
 
   get time() {
@@ -170,7 +174,9 @@ export class Simulation {
     if (this.tick % TICKS_PER_DAY === 0) {
       this.market.newDay(this);
       this.stats = collectStats(this);
-      this.history.push({ day: Math.floor(this.tick / TICKS_PER_DAY), population: this.stats.population, treasury: Math.round(this.treasury), bread: this.market.prices.bread, avgHunger: this.stats.avgHunger, avgMood: this.stats.avgMood, money: Math.round(this.totalMoney()) });
+      const dayStart = this.tick - TICKS_PER_DAY;
+      const crimes = this.crimeLog.filter((r) => r.tick >= dayStart).length;
+      this.history.push({ day: Math.floor(this.tick / TICKS_PER_DAY), population: this.stats.population, treasury: Math.round(this.treasury), bread: this.market.prices.bread, avgHunger: this.stats.avgHunger, avgMood: this.stats.avgMood, money: Math.round(this.totalMoney()), crimes, health: this.stats.avgHealth, unrest: this.unrest });
       if (this.history.length > 400) this.history.shift();
     }
     if (this.tick % TICKS_PER_DAY === 6 * TICKS_PER_HOUR) collectTaxes(this);
@@ -181,6 +187,10 @@ export class Simulation {
   private onSeasonChange(season: Season): void {
     const names = ['Пришла весна. Поля зеленеют.', 'Наступило лето. Дни стали длинными.', 'Пришла осень. Время жатвы.', 'Настала зима. Реку сковывает лёд.'];
     this.chronicle.log(this.tick, EventKind.Info, names[season], this.world.poi.cx, this.world.poi.cy, [], 0.5);
+  }
+
+  computeStats(): Stats {
+    return collectStats(this);
   }
 
   buildingDefName(b: Building): string {

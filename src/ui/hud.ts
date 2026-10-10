@@ -2,6 +2,7 @@ import type { Game } from '../main';
 import { formatClock, formatDate } from '../core/time';
 import { plural } from '../core/math';
 import { weatherText } from '../sim/weather';
+import { OVERLAY_NAMES } from '../render/overlays';
 
 export class Hud {
   root: HTMLElement;
@@ -43,14 +44,44 @@ export class Hud {
     mb.className = 'btn market';
     mb.textContent = 'Рынок';
     mb.title = 'Цены, запасы и казна (M)';
-    mb.addEventListener('click', () => game.marketPanel.toggle());
+    mb.addEventListener('click', () => game.showPanel('market'));
     hud.appendChild(mb);
     const gb = document.createElement('button');
     gb.className = 'btn god';
     gb.textContent = 'Силы';
     gb.title = 'Божественные силы (G)';
-    gb.addEventListener('click', () => game.godPanel.toggle());
+    gb.addEventListener('click', () => game.showPanel('god'));
     hud.appendChild(gb);
+    const sb = document.createElement('button');
+    sb.className = 'btn sm';
+    sb.textContent = 'Статистика';
+    sb.title = 'Статистика и графики (T)';
+    sb.addEventListener('click', () => game.showPanel('stats'));
+    hud.appendChild(sb);
+    const ob = document.createElement('button');
+    ob.className = 'btn sm';
+    ob.textContent = 'Оверлей';
+    ob.title = 'Переключить оверлей карты (O)';
+    ob.addEventListener('click', () => game.cycleOverlay());
+    hud.appendChild(ob);
+    const svb = document.createElement('button');
+    svb.className = 'btn sm';
+    svb.textContent = '💾';
+    svb.title = 'Сохранить в браузере (F5 не сотрёт)';
+    svb.addEventListener('click', () => game.saveGame('autosave'));
+    hud.appendChild(svb);
+    const exb = document.createElement('button');
+    exb.className = 'btn sm';
+    exb.textContent = '⤓';
+    exb.title = 'Экспорт сохранения в файл JSON';
+    exb.addEventListener('click', () => game.exportSave());
+    hud.appendChild(exb);
+    const imb = document.createElement('button');
+    imb.className = 'btn sm';
+    imb.textContent = '⤒';
+    imb.title = 'Импорт сохранения из файла JSON';
+    imb.addEventListener('click', () => game.importSave());
+    hud.appendChild(imb);
     const tl = document.createElement('div');
     tl.id = 'topleft';
     tl.className = 'panel';
@@ -63,7 +94,7 @@ export class Hud {
     const help = document.createElement('div');
     help.id = 'help';
     help.className = 'panel';
-    help.innerHTML = `<kbd>WASD</kbd> камера · <kbd>колесо</kbd> зум · <kbd>пробел</kbd> пауза · <kbd>1</kbd>–<kbd>4</kbd> скорость · <kbd>F</kbd> следовать · <kbd>M</kbd> рынок · <kbd>G</kbd> силы · <kbd>Esc</kbd> снять`;
+    help.innerHTML = `<kbd>WASD</kbd> камера · <kbd>колесо</kbd> зум · <kbd>пробел</kbd> пауза · <kbd>1</kbd>–<kbd>4</kbd> скорость · <kbd>F</kbd> следовать · <kbd>M</kbd> рынок · <kbd>G</kbd> силы · <kbd>T</kbd> статистика · <kbd>O</kbd> оверлей · <kbd>Esc</kbd> снять`;
     root.appendChild(help);
   }
 
@@ -78,7 +109,9 @@ export class Hud {
     const order = [0, 1, 2, 4, 8];
     this.speedBtns.forEach((b, i) => b.classList.toggle('active', order[i] === sp));
     const seedLine = `<b>${sim.seedText}</b> · ${sim.world.sizeName}`;
-    this.topleft.innerHTML = `${seedLine}<br><span class="fps">${fps.toFixed(0)} FPS · объектов: ${this.game.renderer.debug.drawn}</span>`;
+    const ov = this.game.renderer.showOverlay;
+    const paused = this.game.paused ? ' · <b>ПАУЗА</b>' : '';
+    this.topleft.innerHTML = `${seedLine}${paused}<br><span class="fps">${fps.toFixed(0)} FPS · объектов: ${this.game.renderer.debug.drawn}</span>${ov !== 'none' ? `<br><span class="overlay">Оверлей: ${OVERLAY_NAMES[ov]}</span>` : ''}${this.game.autosaveStatus ? `<br><span class="fps">${this.game.autosaveStatus}</span>` : ''}`;
   }
 
   showTooltip(x: number, y: number, html: string): void {
