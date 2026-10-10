@@ -11,6 +11,7 @@ import { collectTaxes } from '../economy/taxes';
 import { createPopulation } from './population';
 import { stepCitizens } from './systems';
 import { Stats, collectStats } from './stats';
+import type { Talk } from '../ai/conversation';
 
 export interface SimOptions {
   seedText: string;
@@ -35,6 +36,8 @@ export class Simulation {
   lastTax = 0;
   lastCharity = 0;
   stats: Stats;
+  /** Текущие разговоры (ключ — id первого собеседника) */
+  talks = new Map<number, Talk>();
   /** Камера (центр в тайлах) — для LOD */
   focusX = 0;
   focusY = 0;

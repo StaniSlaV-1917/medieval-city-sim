@@ -33,6 +33,10 @@ export function think(sim: Simulation, c: Citizen): void {
 export function startAction(ctx: ActionCtx, def: ActionDef): boolean {
   const { c, sim } = ctx;
   const prev = c.action;
+  if (prev !== def.id && (prev === 'work' || prev === 'patrol')) {
+    const pd = ACTIONS[prev];
+    if (pd.finish) pd.finish(ctx); // жалованье в конце смены
+  }
   c.action = def.id;
   if (prev !== def.id) c.actionData = { ...c.actionData, building: -1, outdoor: 0 };
   const ok = def.start(ctx);

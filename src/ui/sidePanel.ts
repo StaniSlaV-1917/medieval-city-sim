@@ -63,7 +63,7 @@ export class SidePanel {
   }
 
   citizenTooltip(c: Citizen): string {
-    const act = ACTION_LABELS[c.action] ?? '';
+    const act = c.state === 3 ? 'беседует' : (ACTION_LABELS[c.action] ?? '');
     return `<b>${fullName(c)}</b>, ${c.age} · ${professionName(c)}<br>${act} · ${moodWord(c.mood)}<br><i>${c.thought || ''}</i>`;
   }
 
@@ -100,6 +100,11 @@ export class SidePanel {
       .slice(0, 8)
       .map(([id, v]) => `<div class="rel"><span class="${v > 20 ? 'good' : v < -20 ? 'bad' : ''}">${v > 0 ? '+' : ''}${Math.round(v)}</span> ${this.link(id)} — ${relWord(v)}</div>`)
       .join('');
+    const mems = [...c.memories]
+      .slice(-8)
+      .reverse()
+      .map((m) => `<div><span class="t">${formatDate(m.tick)}:</span> ${m.text}</div>`)
+      .join('');
     const bio = [...c.bio]
       .slice(-12)
       .reverse()
@@ -115,7 +120,7 @@ export class SidePanel {
       <button class="close" title="Закрыть (Esc)">✕</button>
       ${portrait}
       <h2>${fullName(c)}</h2>
-      <div class="sub">${professionName(c)}, ${c.age} ${ageWord(c.age)} · ${ACTION_LABELS[c.action] ?? ''} · ${moodWord(c.mood)}</div>
+      <div class="sub">${professionName(c)}, ${c.age} ${ageWord(c.age)} · ${c.state === 3 ? 'беседует' : (ACTION_LABELS[c.action] ?? '')} · ${moodWord(c.mood)}</div>
       <div class="thought">«${c.thought || '…'}»</div>
       <div class="traits">${traits}</div>
       <div class="section"><h3>Потребности</h3>${needs}</div>
@@ -127,6 +132,7 @@ export class SidePanel {
       </div>
       <div class="section"><h3>Семья</h3>${fam.length ? fam.join('<br>') : 'одинок(а)'}</div>
       <div class="section"><h3>Отношения</h3>${rels || 'пока ни с кем не знаком(а)'}</div>
+      <div class="section"><h3>Память</h3><div class="bio">${mems || 'ничего примечательного'}</div></div>
       <div class="section"><h3>Биография</h3><div class="bio">${bio || '—'}</div></div>
       <div class="actions"><button class="btn small" id="follow">${following}</button></div>`;
   }

@@ -312,9 +312,11 @@ const work: ActionDef = {
     const { c, sim } = ctx;
     const b = workOf(ctx);
     if (!b) return;
-    // Жалованье: раз в завершение смены (если это конец рабочего дня)
+    // Жалованье: раз в день по окончании смены
     const hour = hourOf(sim.tick);
-    if (!isWorkHour(ctx.sched, hour + 0.5)) {
+    const day = Math.floor(sim.tick / TICKS_PER_DAY);
+    if (!isWorkHour(ctx.sched, hour + 0.5) && c.actionData.paidDay !== day) {
+      c.actionData.paidDay = day;
       let wage = wageOf(c);
       if (hasTrait(c, Trait.Lazy)) wage = Math.round(wage * 0.8);
       if (wage > 0) {
@@ -423,10 +425,12 @@ const patrol: ActionDef = {
   finish(ctx) {
     const { c, sim } = ctx;
     const hour = hourOf(sim.tick);
-    if (!isWorkHour(ctx.sched, hour + 0.5) && sim.treasury >= 6) {
-      sim.treasury -= 6;
-      c.money += 6;
-      shareWage(sim, c, 6);
+    const day = Math.floor(sim.tick / TICKS_PER_DAY);
+    if (!isWorkHour(ctx.sched, hour + 0.5) && c.actionData.paidDay !== day && sim.treasury >= 7) {
+      c.actionData.paidDay = day;
+      sim.treasury -= 7;
+      c.money += 7;
+      shareWage(sim, c, 7);
     }
   },
 };
@@ -886,6 +890,55 @@ const fetchWater: ActionDef = {
   },
 };
 
+const visitFriend: ActionDef = {
+  id: 'visit_friend',
+  interruptible: true,
+  score(ctx) {
+    const { c, hour, sched, sim } = ctx;
+    if (isSleepHour(sched, hour) || isWorkHour(sched, hour)) return 0;
+    if (c.needs.social > 60) return 0;
+    if (c.talkCooldown > 0) return 0;
+    let best = 0;
+    for (const [id, v] of c.relations) {
+      if (v < 25) continue;
+      const o = sim.citizens[id];
+      if (!o || !o.alive || o.inside >= 0 || o.state === CitizenState.Sleeping || o.state === CitizenState.Talking) continue;
+      if (isChild(c) !== isChild(o)) continue;
+      const d = Math.abs(o.x - c.x) + Math.abs(o.y - c.y);
+      if (d > 45) continue;
+      const sc = (60 - c.needs.social) * 0.5 + v * 0.2 - d * 0.3 + (hasTrait(c, Trait.Talkative) ? 10 : 0) + (hasTrait(c, Trait.Gloomy) ? -10 : 0);
+      if (sc > best) {
+        best = sc;
+        c.actionData.friend = id;
+      }
+    }
+    return best;
+  },
+  start(ctx) {
+    const { c, sim, rng } = ctx;
+    const o = sim.citizens[c.actionData.friend];
+    if (!o || !o.alive || o.inside >= 0) return false;
+    think(c, pickText(rng, [`Пойду проведаю ${o.firstName}.`, `Давно не видел${c.sex === 'f' ? 'а' : ''} ${o.firstName}.`, `Надо перекинуться словечком с ${o.firstName}.`]));
+    return goTo(ctx, Math.round(o.x), Math.round(o.y));
+  },
+  arrive(ctx) {
+    const { c, sim } = ctx;
+    const o = sim.citizens[c.actionData.friend];
+    if (o && o.alive && o.inside < 0 && Math.abs(o.x - c.x) + Math.abs(o.y - c.y) < 3 && o.state !== CitizenState.Sleeping && o.state !== CitizenState.Talking) {
+      c.talkCooldown = 0;
+      o.talkCooldown = 0;
+      if (startTalkRef && startTalkRef(sim, c, o)) return;
+    }
+    actFor(ctx, 10);
+  },
+};
+
+/** Ссылка на запуск разговора (устанавливается из conversation.ts, чтобы избежать циклического импорта) */
+export let startTalkRef: ((sim: Simulation, a: Citizen, b: Citizen) => boolean) | null = null;
+export function setStartTalk(fn: (sim: Simulation, a: Citizen, b: Citizen) => boolean): void {
+  startTalkRef = fn;
+}
+
 const idle: ActionDef = {
   id: 'idle',
   interruptible: true,
@@ -902,7 +955,7 @@ const idle: ActionDef = {
 };
 
 export const ACTIONS: Record<string, ActionDef> = {};
-for (const a of [sleep, work, patrol, eatHome, buyFood, tavern, pray, stroll, wander, homeRest, play, bench, beg, prowl, fetchWater, idle]) ACTIONS[a.id] = a;
+for (const a of [sleep, work, patrol, eatHome, buyFood, tavern, pray, stroll, wander, homeRest, play, bench, beg, prowl, fetchWater, visitFriend, idle]) ACTIONS[a.id] = a;
 
 export const ACTION_LABELS: Record<string, string> = {
   sleep: 'спит',
@@ -922,6 +975,7 @@ export const ACTION_LABELS: Record<string, string> = {
   fetch_water: 'идёт за водой',
   idle: 'стоит',
   talk: 'беседует',
+  visit_friend: 'идёт к другу',
 };
 
 export { District, EventKind };
