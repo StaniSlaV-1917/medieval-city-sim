@@ -62,7 +62,7 @@ export function newCitizen(sim: Simulation, p: { firstName: string; lastName: st
     px: p.x,
     py: p.y,
     dir: 0,
-    speed: 0.3,
+    speed: 1,
     path: null,
     pathIdx: 0,
     targetX: p.x,
