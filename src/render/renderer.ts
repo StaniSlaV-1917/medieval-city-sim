@@ -14,10 +14,12 @@ import { Citizen, CitizenState } from '../sim/citizen';
 import { getCitizenSprite } from './citizenSprites';
 import { drawBubbles } from './bubbles';
 import { drawWeather } from './weather';
+import { getAnimalSprite } from './animalSprites';
+import { AnimalKind } from '../sim/animals';
 
 interface Drawable {
   y: number; // ключ сортировки (мировые px)
-  kind: 0 | 1 | 2 | 3; // 0 здание, 1 проп, 2 житель, 3 стена
+  kind: 0 | 1 | 2 | 3 | 4; // 0 здание, 1 проп, 2 житель, 3 стена, 4 животное
   ref: number;
 }
 
@@ -106,6 +108,7 @@ export class Renderer {
       if (d.kind === 0) this.drawBuilding(g, d.ref, snow);
       else if (d.kind === 1) this.drawProp(g, d.ref, season);
       else if (d.kind === 2) this.drawCitizen(g, sim.citizens[d.ref]);
+      else if (d.kind === 4) this.drawAnimal(g, d.ref);
       else this.drawWall(g, d.ref, snow);
     }
     this.debug.drawn = drawn;
@@ -161,9 +164,18 @@ export class Renderer {
       if (p.x < tx0 - 1 || p.x > tx1 + 1 || p.y < ty0 - 2 || p.y > ty1 + 1) continue;
       out.push({ y: (p.y + p.oy) * TILE, kind: 1, ref: i });
     }
+    // Животные
+    const an = this.sim.animals;
+    const a = this.alpha;
+    for (let i = 0; i < an.length; i++) {
+      const z = an[i];
+      const ax = z.px + (z.x - z.px) * a;
+      const ay = z.py + (z.y - z.py) * a;
+      if (ax < tx0 - 1 || ax > tx1 + 1 || ay < ty0 - 1 || ay > ty1 + 1) continue;
+      out.push({ y: z.kind === AnimalKind.Bird ? 1e9 : (ay + 0.5) * TILE, kind: 4, ref: i });
+    }
     // Жители
     const cs = this.sim.citizens;
-    const a = this.alpha;
     for (let i = 0; i < cs.length; i++) {
       const c = cs[i];
       if (!c.alive || c.inside >= 0) continue;
@@ -211,6 +223,23 @@ export class Renderer {
     g.drawImage(s.canvas, s.x, s.y, s.w, s.h, x, y, s.w, s.h);
   }
 
+  private drawAnimal(g: CanvasRenderingContext2D, i: number): void {
+    const z = this.sim.animals[i];
+    const a = this.alpha;
+    const ax = (z.px + (z.x - z.px) * a + 0.5) * TILE;
+    const ay = (z.py + (z.y - z.py) * a + 0.5) * TILE;
+    const s = getAnimalSprite(z.kind, z.dir, Math.floor(z.anim) % 2);
+    if (z.kind === AnimalKind.Bird) {
+      g.fillStyle = 'rgba(0,0,0,0.1)';
+      g.fillRect(Math.round(ax) - 2, Math.round(ay) + 10, 5, 1);
+      g.drawImage(s.canvas, s.x, s.y, s.w, s.h, Math.round(ax - s.ax), Math.round(ay - 22 - s.ay), s.w, s.h);
+      return;
+    }
+    g.fillStyle = 'rgba(0,0,0,0.18)';
+    g.fillRect(Math.round(ax) - 3, Math.round(ay) + 1, 6, 1);
+    g.drawImage(s.canvas, s.x, s.y, s.w, s.h, Math.round(ax - s.ax), Math.round(ay + 2 - s.ay), s.w, s.h);
+  }
+
   private drawWall(g: CanvasRenderingContext2D, i: number, snow: boolean): void {
     const world = this.sim.world;
     const t = world.tiles[i];
@@ -229,6 +258,12 @@ export class Renderer {
     const s = getCitizenSprite(c, c.dir, frame);
     const x = Math.round(cx - s.ax);
     const y = Math.round(cy + 3 - s.ay);
+    if (c.actionData.cart) {
+      const cs = getPropSprite(PropType.Cart, 0, this.sim.season);
+      const off = c.dir === 2 ? -14 : c.dir === 1 ? 14 : 0;
+      const offY = c.dir === 0 ? -12 : c.dir === 3 ? 12 : 0;
+      g.drawImage(cs.canvas, cs.x, cs.y, cs.w, cs.h, Math.round(cx + off - cs.ax), Math.round(cy + offY + 4 - cs.ay), cs.w, cs.h);
+    }
     // тень
     g.fillStyle = 'rgba(0,0,0,0.22)';
     g.fillRect(Math.round(cx) - 3, Math.round(cy) + 1, 6, 2);

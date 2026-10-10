@@ -21,6 +21,9 @@ import { Weather, createWeather, updateWeather } from './weather';
 import { Fire, igniteBuilding, updateFires } from './fire';
 import { updateHealth, updateFunerals } from './health';
 import { Building, BUILDING_DEFS } from '../world/buildings';
+import { Animal, createAnimals, updateAnimals } from './animals';
+import { Festival, updateCityEvents } from './cityEvents';
+import type { Good } from '../economy/goods';
 
 export interface SimOptions {
   seedText: string;
@@ -73,6 +76,16 @@ export class Simulation {
   fireRiskMul = 1;
   epidemicMul = 1;
   lightningFlash = 0;
+  animals: Animal[] = [];
+  festival: Festival | null = null;
+  unrest = 10;
+  protest: { until: number; riot: boolean; members: number[]; x: number; y: number; responded?: boolean } | null = null;
+  caravan: { members: number[]; phase: number; goods: Partial<Record<Good, number>>; until: number; dest: { x: number; y: number } } | null = null;
+  raid: { members: number[]; phase: number; gate: { x: number; y: number }; until: number; loot: number } | null = null;
+  nextCaravanDay = 2;
+  nextRaidDay = 6;
+  heraldNews: string[] = [];
+  timers: { at: number; fn: () => void }[] = [];
   igniteBuilding: ((id: number, cause: string, intensity?: number) => boolean) | null = null;
   onBuildingDestroyed: ((b: Building, cause: string) => void) | null = null;
   /** Счётчики для инвариантов */
@@ -96,6 +109,7 @@ export class Simulation {
     this.stats = collectStats(this);
     this.market.update(this);
     this.igniteBuilding = (id, cause, intensity) => igniteBuilding(this, id, cause, intensity);
+    createAnimals(this);
     this.chronicle.log(this.tick, EventKind.Info, `Город Вальдмарк основан. Население — ${this.citizens.length} человек.`, this.world.poi.cx, this.world.poi.cy, [], 1);
   }
 
@@ -126,6 +140,15 @@ export class Simulation {
     updateFires(this);
     updateHealth(this);
     updateFunerals(this);
+    updateCityEvents(this);
+    updateAnimals(this);
+    if (this.timers.length) {
+      const due = this.timers.filter((t) => t.at <= this.tick);
+      if (due.length) {
+        this.timers = this.timers.filter((t) => t.at > this.tick);
+        for (const t of due) t.fn();
+      }
+    }
     if (this.tick % TICKS_PER_HOUR === 0) this.market.update(this);
     if (this.tick % TICKS_PER_DAY === 0) {
       this.market.newDay(this);

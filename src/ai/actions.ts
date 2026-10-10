@@ -703,7 +703,13 @@ const tavern: ActionDef = {
       }
     }
     const cups = hasTrait(c, Trait.Drunkard) ? 3 : rng.chance(0.3) ? 2 : 1;
-    drank = m.buyRetail(sim, c, b, 'ale', cups, false);
+    if ((b.storage['freeAle'] ?? 0) > 0 && (b.storage['ale'] ?? 0) >= 1) {
+      // праздничный эль за счёт казны
+      b.storage['freeAle']--;
+      b.storage['ale']--;
+      drank = 1;
+      if (rng.chance(0.5)) say(c, 'За здоровье бургомистра!', 35, false, sim.tick);
+    } else drank = m.buyRetail(sim, c, b, 'ale', cups, false);
     if (drank === 0 && (b.storage['ale'] ?? 0) <= 0) {
       say(c, pickText(rng, ['Что значит — эль кончился?!', 'Пустые бочки? Позор!']), 35, false, sim.tick);
       think(c, 'В таверне нет эля. Ну и город.');
