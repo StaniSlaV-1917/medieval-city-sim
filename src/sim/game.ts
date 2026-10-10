@@ -13,6 +13,9 @@ import { stepCitizens } from './systems';
 import { Stats, collectStats } from './stats';
 import type { Talk } from '../ai/conversation';
 import { Market } from '../economy/market';
+import type { Alarm, CrimeRecord } from './crime';
+import type { ActionCtx } from '../ai/actions';
+import type { Order } from './citizen';
 import { dailyTrade } from '../economy/trade';
 
 export interface SimOptions {
@@ -41,6 +44,11 @@ export class Simulation {
   /** Текущие разговоры (ключ — id первого собеседника) */
   talks = new Map<number, Talk>();
   market = new Market();
+  alarms: Alarm[] = [];
+  crimeLog: CrimeRecord[] = [];
+  fights: { a: number; b: number; until: number }[] = [];
+  /** Поджог по приказу (устанавливается в фазе 6) */
+  arsonOrderStart: ((ctx: ActionCtx, o: Order) => boolean) | null = null;
   /** Принудительный исход ближайшего разговора по приказу: 1 — дружба, 2 — ссора, 3 — флирт */
   forcedTalk: { a: number; mode: number } | null = null;
   /** Ожидающая свадьба (для церемонии) */

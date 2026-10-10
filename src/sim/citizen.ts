@@ -266,6 +266,20 @@ export function fullName(c: Citizen): string {
   return `${c.firstName} ${c.lastName}`;
 }
 
+/** Имя и фамилия в винительном падеже (упрощённо) */
+export function nameAcc(c: Citizen): string {
+  const f = c.firstName;
+  let fa = f;
+  if (f.endsWith('а')) fa = f.slice(0, -1) + 'у';
+  else if (f.endsWith('я')) fa = f.slice(0, -1) + 'ю';
+  else if (f.endsWith('й')) fa = f.slice(0, -1) + 'я';
+  else if (/[бвгджзклмнпрстфхцчшщ]$/.test(f)) fa = f + 'а';
+  let la = c.lastName;
+  if (c.sex === 'm' && !la.startsWith('фон') && /[бвгджзклмнпрстфхцчшщ]$/.test(la)) la = la + 'а';
+  else if (c.sex === 'f' && la.endsWith('а')) la = la.slice(0, -1) + 'у';
+  return `${fa} ${la}`;
+}
+
 export function professionName(c: Citizen): string {
   return PROFESSION_NAMES[c.profession][c.sex];
 }

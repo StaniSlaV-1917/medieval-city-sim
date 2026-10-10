@@ -6,6 +6,7 @@ import { makeLine, pickTopic, Line, Topic, ALMS_GIVE, ALMS_THANKS } from './dial
 import { dist2 } from '../core/math';
 import { EventKind } from '../events/chronicle';
 import { pay } from '../economy/money';
+import { maybeFightAfterQuarrel } from '../sim/crime';
 
 export interface Talk {
   a: number;
@@ -187,6 +188,7 @@ function endTalk(sim: Simulation, t: Talk, completed: boolean): void {
     b.mood -= 10;
     remember(a, tick, `Поссорился${a.sex === 'f' ? 'ась' : 'ся'} с ${fullName(b)}.`, 0.45, b.id, 'quarrel');
     remember(b, tick, `Поссорился${b.sex === 'f' ? 'ась' : 'ся'} с ${fullName(a)}.`, 0.45, a.id, 'quarrel');
+    if (maybeFightAfterQuarrel(sim, a, b) || maybeFightAfterQuarrel(sim, b, a)) return;
     if (sim.rng.chance(0.25)) sim.chronicle.log(tick, EventKind.Social, `${fullName(a)} и ${fullName(b)} поругались на улице.`, Math.round(a.x), Math.round(a.y), [a.id, b.id], 0.3);
     // свидетели запоминают
     sim.spatial.query(a.x, a.y, 5, scratch);

@@ -52,11 +52,12 @@ export function setDestination(sim: Simulation, c: Citizen, tx: number, ty: numb
 }
 
 export function citizenSpeed(sim: Simulation, c: Citizen): number {
-  let s = BASE_SPEED;
+  let s = BASE_SPEED * (c.speed || 1);
   if (isChild(c)) s *= 1.05;
   else if (isElder(c)) s *= 0.65;
   if (c.drunk > 30) s *= 0.75;
   if (c.needs.health < 40) s *= 0.7;
+  if (c.hp < 40) s *= 0.75;
   if (c.needs.energy < 15) s *= 0.8;
   const t = sim.world.tiles[Math.round(c.y) * sim.world.w + Math.round(c.x)];
   const cost = TILE_INFO[t]?.cost ?? 1.5;

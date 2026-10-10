@@ -1085,15 +1085,19 @@ const prowl: ActionDef = {
     const { c, hour } = ctx;
     if (c.profession !== Profession.Thief) return 0;
     if (hour >= 22 || hour < 4) return 40;
-    if (hour >= 10 && hour < 20) return 12; // присматривается на площади
+    if (hour >= 10 && hour < 20) return 34; // присматривается на площади
     return 0;
   },
   start(ctx) {
     const { c, sim, rng } = ctx;
     const world = sim.world;
-    const spot = randomRoadTileNear(sim, rng, world.poi.cx + rng.float(-20, 20), world.poi.cy + rng.float(-20, 20), 10);
+    const night = hourOf(sim.tick) >= 22 || hourOf(sim.tick) < 4;
+    const sq = world.poi.square;
+    const spot = night
+      ? randomRoadTileNear(sim, rng, world.poi.cx + rng.float(-20, 20), world.poi.cy + rng.float(-20, 20), 10)
+      : nearestWalkable(world, sq.x + rng.int(1, sq.w - 2), sq.y + rng.int(1, sq.h - 2), 3);
     if (!spot) return false;
-    think(c, pickText(rng, ['Присмотрюсь к богатым домам.', 'Тихо… никого.', 'У того купца кошель тяжёлый.', 'Стража далеко.']));
+    think(c, pickText(rng, night ? ['Присмотрюсь к богатым домам.', 'Тихо… никого.', 'Стража далеко.'] : ['У того купца кошель тяжёлый.', 'В толпе легче всего.', 'Главное — не попадаться на глаза страже.']));
     return goTo(ctx, spot.x, spot.y);
   },
   arrive(ctx) {

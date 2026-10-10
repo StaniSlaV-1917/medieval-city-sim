@@ -7,6 +7,8 @@ import { think, makeCtx } from '../ai/brain';
 import { decayNeeds, computeMood } from './needs';
 import { updateConversations } from '../ai/conversation';
 import { hourOf, daylight } from '../core/time';
+import { updateCrime, updateTavernBrawls, checkRobbed, checkBurgled, guardSpotsWanted } from './crime';
+import { Profession } from './citizen';
 
 const LOD_DIST = 70; // тайлов от фокуса камеры
 
@@ -33,6 +35,8 @@ export function stepCitizens(sim: Simulation): void {
     stepCitizen(sim, c, mul);
   }
   updateConversations(sim);
+  updateCrime(sim);
+  updateTavernBrawls(sim);
   if (tick % 20 === 0) updateBuildingLights(sim);
 }
 
@@ -41,6 +45,9 @@ function stepCitizen(sim: Simulation, c: Citizen, mul: number): void {
   // Потребности — раз в 10 тиков
   if ((tick + c.id) % 10 === 0) {
     decayNeeds(c, 10);
+    if (c.hp < 100 && c.state === CitizenState.Sleeping) c.hp = Math.min(100, c.hp + 0.25);
+    else if (c.hp < 100 && (tick + c.id) % 50 === 0) c.hp = Math.min(100, c.hp + 0.5);
+    if (c.hp >= 60) c.flags &= ~8;
     if ((tick + c.id) % 100 === 0) c.mood = computeMood(c);
   }
   if (c.speech && c.speech.until <= tick) c.speech = null;
@@ -81,6 +88,7 @@ function stepCitizen(sim: Simulation, c: Citizen, mul: number): void {
       const def = ACTIONS[c.action];
       let done = tick >= c.actionUntil;
       if (!done && def && def.tick && (tick + c.id) % 10 === 0) done = def.tick(makeCtx(sim, c));
+      if (c.profession === Profession.Guard && (tick + c.id) % 15 === 0) guardSpotsWanted(sim, c);
       if (done) {
         if (def && def.finish) def.finish(makeCtx(sim, c));
         c.state = CitizenState.Idle;
@@ -94,6 +102,8 @@ function stepCitizen(sim: Simulation, c: Citizen, mul: number): void {
     case CitizenState.Idle:
     default: {
       if (tick >= c.nextThink) {
+        if (c.actionData.robbedAt) checkRobbed(sim, c);
+        if (c.actionData.burgledAt) checkBurgled(sim, c);
         think(sim, c);
         if (c.state === CitizenState.Idle) c.nextThink = tick + 10 + sim.rng.int(0, 20);
       }
