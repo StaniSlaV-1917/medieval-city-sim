@@ -12,7 +12,7 @@ import { GodPanel } from './ui/godPanel';
 import { StatsPanel } from './ui/statsPanel';
 import { Minimap } from './ui/minimap';
 import { serialize, deserialize, saveToDb, loadFromDb, downloadJson, pickJsonFile } from './save/save';
-import { OVERLAY_NAMES } from './render/overlays';
+import { OVERLAY_NAMES, OVERLAY_ORDER } from './render/overlays';
 import type { OrderDef } from './ai/orders';
 import { WindowManager, Win } from './ui/windows';
 import { TooltipSystem } from './ui/tooltip';
@@ -71,11 +71,11 @@ export class Game {
   private running = true;
   private ui: HTMLElement;
 
-  constructor(seed: string, size: CitySize, loaded?: Simulation) {
+  constructor(seed: string, size: CitySize, loaded?: Simulation, fog = false) {
     const canvas = document.getElementById('game') as HTMLCanvasElement;
     const ui = document.getElementById('ui') as HTMLElement;
     this.ui = ui;
-    this.sim = loaded ?? new Simulation({ seedText: seed, size });
+    this.sim = loaded ?? new Simulation({ seedText: seed, size, fog });
     this.settings = loadSettings();
     this.renderer = new Renderer(canvas, this.sim);
     this.windows = new WindowManager(ui);
@@ -430,9 +430,8 @@ export class Game {
   }
 
   cycleOverlay(): void {
-    const order: ('none' | 'crime' | 'fire' | 'wealth')[] = ['none', 'crime', 'fire', 'wealth'];
-    const i = order.indexOf(this.renderer.showOverlay);
-    this.renderer.showOverlay = order[(i + 1) % order.length];
+    const i = OVERLAY_ORDER.indexOf(this.renderer.showOverlay);
+    this.renderer.showOverlay = OVERLAY_ORDER[(i + 1) % OVERLAY_ORDER.length];
   }
 
   private updateHover(): void {
@@ -455,6 +454,13 @@ export class Game {
       this.tooltip.showAt(sx, sy, this.side.buildingTooltip(this.sim.world.buildings[bid]));
       return;
     }
+    // подсказка по земле: угодье, тайл, ресурс
+    const w = this.renderer.camera.screenToWorld(sx, sy);
+    const tt = this.side.tileTooltip(Math.floor(w.x / TILE), Math.floor(w.y / TILE));
+    if (tt) {
+      this.tooltip.showAt(sx, sy, tt);
+      return;
+    }
     this.tooltip.hideMap();
   }
 }
@@ -463,8 +469,8 @@ const ui = document.getElementById('ui') as HTMLElement;
 loadFromDb('autosave').then((saved) => {
   showStartScreen(
     ui,
-    (seed, size) => {
-      (window as unknown as { game: Game }).game = new Game(seed, size);
+    (seed, size, fog) => {
+      (window as unknown as { game: Game }).game = new Game(seed, size, undefined, fog);
     },
     saved
       ? {

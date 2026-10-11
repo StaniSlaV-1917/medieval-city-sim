@@ -4,11 +4,13 @@ import type { Game } from '../main';
 import type { Win } from './windows';
 import { BUILDING_DEFS, BuildingType } from '../world/buildings';
 import { STAGE_NAMES } from '../sim/construction';
-import { Tile } from '../world/tiles';
 import { PAUSE_EVENTS, saveSettings } from './settings';
 import { plural } from '../core/math';
 import { GOOD_INFO, GOODS } from '../economy/goods';
-import { TICKS_PER_DAY } from '../core/time';
+import { TICKS_PER_DAY, TICKS_PER_HOUR } from '../core/time';
+import { parcelStats } from '../world/landscape';
+import { hireProspector } from '../sim/prospect';
+import { fullName } from '../sim/citizen';
 import { EDICT_DEFS } from '../data/edicts';
 import { DEV_NODES } from '../data/development';
 import { esc } from './topbar';
@@ -187,39 +189,68 @@ export class TradePanel extends WinPanel {
   }
 }
 
-/** Регион: окрестности города */
+/** Регион: угодья с ресурсами, разведка, угрозы */
 export class RegionPanel extends WinPanel {
+  private msg = '';
+
   constructor(win: Win, game: Game) {
     super(win, game);
     this.el.classList.add('region');
     this.interval = 3000;
+    this.el.addEventListener('click', (e) => {
+      const t = e.target as HTMLElement;
+      if (t.id === 'rg-prospect') {
+        this.msg = hireProspector(this.game.sim);
+        this.render();
+        return;
+      }
+      const cl = t.closest<HTMLElement>('[data-citizen]');
+      if (cl) {
+        this.game.selectCitizen(Number(cl.dataset.citizen), true);
+        return;
+      }
+      const row = t.closest<HTMLElement>('[data-parcel]');
+      if (row) {
+        const p = this.game.sim.world.parcels[Number(row.dataset.parcel)];
+        if (p) {
+          this.game.panTo(p.cx, p.cy);
+          this.game.renderer.showOverlay = 'parcels';
+        }
+      }
+    });
   }
 
   protected render(): void {
     const sim = this.game.sim;
     const w = sim.world;
-    let forest = 0;
-    let field = 0;
-    let water = 0;
-    let rock = 0;
-    for (let i = 0; i < w.tiles.length; i++) {
-      const t = w.tiles[i];
-      if (t === Tile.Forest) forest++;
-      else if (t === Tile.Field) field++;
-      else if (t === Tile.Water || t === Tile.Shallow) water++;
-      else if (t === Tile.Rock || t === Tile.Quarry) rock++;
-    }
-    const farms = w.buildings.filter((b) => b.type === BuildingType.Farm && b.condition > 0).length;
-    const animals = sim.animals.length;
+    const rows = w.parcels
+      .map((p) => {
+        const st = parcelStats(w, p.id);
+        const explored = w.fog ? Math.round((st.explored / Math.max(1, st.tiles)) * 100) : 100;
+        const res: string[] = [];
+        if (st.forest) res.push(`лес ${st.forest}`);
+        if (st.stone) res.push(`камень ${st.stone}`);
+        if (st.iron) res.push(`<b class="good">железо ${st.iron}</b>`);
+        else if (st.hiddenIron && !w.fog) res.push('<i class="muted">что-то в скалах…</i>');
+        if (st.clay) res.push(`глина ${st.clay}`);
+        if (st.salt) res.push(`<b class="good">соль ${st.salt}</b>`);
+        if (st.peat) res.push(`торф ${st.peat}`);
+        if (st.berries) res.push(`дары леса ${st.berries}`);
+        if (st.fish) res.push(`рыба ${st.fish}`);
+        const fert = Math.round(st.fertility * 100);
+        return `<div class="row2 link" data-parcel="${p.id}" data-tip="${esc(`<b>${p.name}</b><br>Тайлов: ${st.tiles} · разведано ${explored}%<br>Клик — показать на карте`)}"><span>${p.name}${explored < 100 ? ` <span class="muted">(${explored}%)</span>` : ''}</span><span class="muted small">почва ${fert}%${res.length ? ' · ' + res.join(', ') : ''}</span></div>`;
+      })
+      .join('');
+    const pr = sim.region.prospector >= 0 ? sim.citizens[sim.region.prospector] : null;
+    const prospectHtml = pr && pr.alive && sim.tick < sim.region.prospectUntil ? `<div>Рудознатец <span class="link" data-citizen="${pr.id}">${fullName(pr)}</span> в пути, вернётся через ${Math.max(0, Math.ceil((sim.region.prospectUntil - sim.tick) / TICKS_PER_HOUR))} ч.</div>` : `<button class="btn small" id="rg-prospect">Нанять рудознатца (40 монет)</button> <span class="muted small">найдёт железо и соль, разведает туман</span>`;
     const day = Math.floor(sim.tick / TICKS_PER_DAY);
+    const game = sim.animals.filter((a) => a.alive && (a.kind === 5 || a.kind === 6)).length;
     this.el.innerHTML = `
-      <div class="sub">Земли вокруг стен. Карта региона, соседние деревни и дороги появятся в будущих фазах.</div>
-      <div class="section"><h3>Угодья</h3>
-        <div>Леса: <b>${forest}</b> ${plural(forest, 'делянка', 'делянки', 'делянок')} · поля: <b>${field}</b> (${farms} ${plural(farms, 'ферма', 'фермы', 'ферм')})</div>
-        <div>Воды: ${water} тайлов · камня: ${rock}</div>
-        <div>Живности в округе: ${animals}</div>
-      </div>
-      <div class="section"><h3>Угрозы</h3>
+      <div class="sub">Земли вокруг стен поделены на угодья. В каждом видно, что там есть; железо и соль надо сначала найти.</div>
+      <div class="section"><h3>Разведка</h3>${prospectHtml}${this.msg ? `<div class="reaction">${this.msg}</div>` : ''}</div>
+      <div class="section"><h3>Угодья (${w.parcels.length})</h3>${rows}</div>
+      <div class="section"><h3>Дичь и угрозы</h3>
+        <div>Оленей и кабанов в лесах: ${game} · живности в городе: ${sim.animals.length - game}</div>
         <div>Разбойники: ${sim.raid ? '<b class="bad">у ворот!</b>' : `замечены не ближе чем через ${Math.max(0, sim.nextRaidDay - day)} ${plural(Math.max(0, sim.nextRaidDay - day), 'день', 'дня', 'дней')}`}</div>
         <div>Дракон: ${sim.dragon ? '<b class="bad">над городом</b>' : 'не видно'} · наводнение: ${sim.flood ? '<b class="bad">идёт</b>' : 'нет'}</div>
       </div>`;

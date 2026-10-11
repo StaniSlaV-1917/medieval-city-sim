@@ -36,6 +36,11 @@ export interface SimOptions {
   startHour?: number;
   /** Не создавать население (для загрузки сохранения) */
   skipPopulation?: boolean;
+  /** Туман неизведанного */
+  fog?: boolean;
+  /** Переопределить размеры (загрузка старых сохранений) */
+  mapTiles?: number;
+  cityTiles?: number;
 }
 
 export class Simulation {
@@ -155,7 +160,7 @@ export class Simulation {
     this.chronicle.listeners.push((e) => this.events.emit('chronicle', e));
     this.seedText = opts.seedText;
     this.size = opts.size;
-    this.world = generateWorld(opts.seedText, opts.size);
+    this.world = generateWorld(opts.seedText, opts.size, { fog: opts.fog, mapTiles: opts.mapTiles, cityTiles: opts.cityTiles });
     this.rng = new RNG(this.world.seed ^ 0x9e3779b9);
     this.pathfinder = new Pathfinder(this.world);
     this.spatial = new SpatialHash(this.world.w, this.world.h, 4);

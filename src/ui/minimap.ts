@@ -1,7 +1,7 @@
 import type { Game } from '../main';
 import { Tile } from '../world/tiles';
 import { TILE } from '../render/camera';
-import { OVERLAY_NAMES } from '../render/overlays';
+import { OVERLAY_NAMES, OVERLAY_ORDER } from '../render/overlays';
 
 export class Minimap {
   el: HTMLElement;
@@ -28,8 +28,8 @@ export class Minimap {
     this.base.height = game.sim.world.h;
     const bar = document.createElement('div');
     bar.className = 'ovbar';
-    const ovs: ('none' | 'crime' | 'fire' | 'wealth')[] = ['none', 'crime', 'fire', 'wealth'];
-    const labels: Record<string, string> = { none: '—', crime: 'Прест.', fire: 'Пожар', wealth: 'Богат.' };
+    const ovs = OVERLAY_ORDER;
+    const labels: Record<string, string> = { none: '—', crime: 'Прест.', fire: 'Пожар', wealth: 'Богат.', parcels: 'Угодья', fertility: 'Почва', resources: 'Ресурсы' };
     for (const o of ovs) {
       const b = document.createElement('button');
       b.className = 'btn ov';
@@ -61,7 +61,12 @@ export class Minimap {
     const d = img.data;
     const col = (t: number): [number, number, number] => {
       switch (t) {
-        case Tile.Water: case Tile.Shallow: return [60, 110, 170];
+        case Tile.Water: case Tile.Shallow: case Tile.Lake: return [60, 110, 170];
+        case Tile.Swamp: return [70, 95, 80];
+        case Tile.Clay: return [170, 110, 70];
+        case Tile.IronOre: return [150, 80, 60];
+        case Tile.Salt: return [210, 205, 190];
+        case Tile.Pasture: return [130, 160, 70];
         case Tile.Road: case Tile.Plaza: case Tile.Gate: return [150, 145, 135];
         case Tile.Dirt: return [150, 120, 80];
         case Tile.Wall: case Tile.Tower: return [70, 70, 70];
@@ -76,7 +81,7 @@ export class Minimap {
     };
     for (let i = 0; i < world.w * world.h; i++) {
       const b = world.buildingAt[i];
-      const c = b >= 0 ? (world.buildings[b].condition <= 0 ? [40, 30, 25] : [160, 70, 50]) : col(world.tiles[i]);
+      const c = !world.explored[i] ? [22, 26, 34] : b >= 0 ? (world.buildings[b].condition <= 0 ? [40, 30, 25] : [160, 70, 50]) : col(world.tiles[i]);
       d[i * 4] = c[0];
       d[i * 4 + 1] = c[1];
       d[i * 4 + 2] = c[2];
@@ -89,7 +94,7 @@ export class Minimap {
     const sim = this.game.sim;
     const cur = this.game.renderer.showOverlay;
     for (const b of this.ovBtns) b.classList.toggle('active', b.dataset.ov === cur);
-    const v = sim.tileVersion * 1000 + sim.buildingVersion + sim.season * 7;
+    const v = sim.tileVersion * 1000 + sim.buildingVersion + sim.season * 7 + sim.region.exploredVersion * 100000;
     if (v !== this.version) {
       this.version = v;
       this.renderBase();

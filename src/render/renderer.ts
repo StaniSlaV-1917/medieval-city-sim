@@ -23,7 +23,7 @@ export interface BubbleOpts {
 }
 import { drawWeather } from './weather';
 import { getAnimalSprite } from './animalSprites';
-import { drawOverlay } from './overlays';
+import { drawOverlay, drawFog, OverlayMode } from './overlays';
 import { AnimalKind } from '../sim/animals';
 
 interface Drawable {
@@ -66,7 +66,11 @@ export class Renderer {
   /** Отладочная информация */
   debug = { drawn: 0, lights: 0 };
   time = 0;
-  showOverlay: 'none' | 'crime' | 'fire' | 'wealth' = 'none';
+  showOverlay: OverlayMode = 'none';
+  /** Индекс пропов по чанкам 32×32 (большие карты: десятки тысяч деревьев) */
+  private propIndex: number[][] = [];
+  private propIndexLen = -1;
+  private propIndexVersion = -1;
   private lastTileVersion = 0;
 
   constructor(canvas: HTMLCanvasElement, sim: Simulation) {
@@ -161,6 +165,7 @@ export class Renderer {
     this.drawFires(g, dt);
     this.drawDragon(g);
     drawOverlay(g, this, sim, view);
+    drawFog(g, sim, view);
     // Ночное освещение
     this.drawLighting(light, view, z, ox, oy);
     // Погода
@@ -171,6 +176,19 @@ export class Renderer {
     bg.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     bg.clearRect(0, 0, this.canvas.width, this.canvas.height);
     drawBubbles(bg, this, sim, { density: this.bubbleOpts.density, favorites: this.bubbleOpts.favorites, viewW: this.canvas.width, viewH: this.canvas.height, topInset: this.bubbleOpts.topInset, bottomInset: this.bubbleOpts.bottomInset, obstacles: this.bubbleOpts.obstacles });
+  }
+
+  private rebuildPropIndex(): void {
+    const world = this.sim.world;
+    const cols = Math.ceil(world.w / 32);
+    const rows = Math.ceil(world.h / 32);
+    this.propIndex = new Array(cols * rows);
+    world.props.forEach((p, i) => {
+      const k = Math.floor(p.y / 32) * cols + Math.floor(p.x / 32);
+      (this.propIndex[k] ??= []).push(i);
+    });
+    this.propIndexLen = world.props.length;
+    this.propIndexVersion = this.sim.tileVersion;
   }
 
   private collectDrawables(x0: number, y0: number, x1: number, y1: number): void {
@@ -196,13 +214,24 @@ export class Renderer {
         if (t === Tile.Wall || t === Tile.Tower || t === Tile.Gate) out.push({ y: (y + 1) * TILE - 0.25, kind: 3, ref: i });
       }
     }
-    // Пропы
+    // Пропы — по индексу чанков
     const props = world.props;
-    for (let i = 0; i < props.length; i++) {
-      const p = props[i];
-      if (p.x < tx0 - 1 || p.x > tx1 + 1 || p.y < ty0 - 2 || p.y > ty1 + 1) continue;
-      out.push({ y: (p.y + p.oy) * TILE, kind: 1, ref: i });
-    }
+    if (this.propIndexLen !== props.length || this.propIndexVersion !== this.sim.tileVersion) this.rebuildPropIndex();
+    const cols = Math.ceil(world.w / 32);
+    const c0 = Math.max(0, Math.floor((tx0 - 1) / 32));
+    const c1 = Math.min(cols - 1, Math.floor((tx1 + 1) / 32));
+    const r0 = Math.max(0, Math.floor((ty0 - 2) / 32));
+    const r1 = Math.min(Math.ceil(world.h / 32) - 1, Math.floor((ty1 + 1) / 32));
+    for (let r = r0; r <= r1; r++)
+      for (let c = c0; c <= c1; c++) {
+        const list = this.propIndex[r * cols + c];
+        if (!list) continue;
+        for (const i of list) {
+          const p = props[i];
+          if (p.x < tx0 - 1 || p.x > tx1 + 1 || p.y < ty0 - 2 || p.y > ty1 + 1) continue;
+          out.push({ y: (p.y + p.oy) * TILE, kind: 1, ref: i });
+        }
+      }
     // Животные
     const an = this.sim.animals;
     const a = this.alpha;

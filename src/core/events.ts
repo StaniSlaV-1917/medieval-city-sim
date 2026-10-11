@@ -27,6 +27,8 @@ export interface SimEvents {
   'god:power': { id: string; x: number; y: number };
   /** Голод в городе начался / отступил */
   famine: { active: boolean; avgHunger: number };
+  /** Рудознатец нашёл скрытый ресурс */
+  'resource:found': { kind: number; x: number; y: number };
 }
 
 type Handler<T> = (payload: T) => void;

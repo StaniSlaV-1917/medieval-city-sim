@@ -176,6 +176,15 @@ function bush(variant: number, col: RGB, snow: boolean): SpriteRef {
   const g = atlas.g;
   const x = ref.x;
   const y = ref.y;
+  if (variant === 0) {
+    // поросль: тонкий ствол и маленькая крона
+    g.fillStyle = '#5a3a1a';
+    g.fillRect(x + 6, y + 4, 1, 5);
+    fillCircle(g, x + 6, y + 3, 2, rgb(col));
+    g.fillStyle = rgb(shade(col, 1.2));
+    g.fillRect(x + 5, y + 2, 1, 1);
+    return ref;
+  }
   fillCircle(g, x + 4, y + 5, 3, rgb(shade(col, 0.8)));
   fillCircle(g, x + 8, y + 5, 3, rgb(shade(col, 0.8)));
   fillCircle(g, x + 6, y + 3, 3, rgb(col));

@@ -12,6 +12,8 @@ import { pay, householdMoney } from '../economy/money';
 import { RECIPES, wantedStock, addStock, producersOf } from '../economy/production';
 import { sellersOf, isOpenAt } from '../economy/market';
 import { startTalk } from './talk';
+import { fellTree, takeResource, LOGS_PER_TREE } from '../sim/nature';
+import { ResourceKind } from '../world/world';
 import { Good, GOOD_INFO } from '../economy/goods';
 import { EventKind } from '../events/chronicle';
 
@@ -409,11 +411,33 @@ export function produce(sim: Simulation, b: Building, c: Citizen, ticks: number)
   const r = RECIPES[b.type];
   if (!r || b.condition <= 0) return;
   const hours = ticks / TICKS_PER_HOUR;
-  // лесорубы в лесу валят брёвна, а не пилят доски
+  // лесорубы в лесу валят брёвна, а не пилят доски: каждые LOGS_PER_TREE брёвен — одно дерево становится пнём
   if (b.type === BuildingType.Sawmill && c.actionData.outdoor) {
     const cut = 1.2 * hours * (hasTrait(c, Trait.Hardworking) ? 1.2 : 1);
+    c.actionData.cutProgress = (c.actionData.cutProgress ?? 0) + cut;
+    if (c.actionData.cutProgress >= LOGS_PER_TREE) {
+      c.actionData.cutProgress -= LOGS_PER_TREE;
+      if (!fellTree(sim, Math.round(c.x), Math.round(c.y), 3)) {
+        // рядом нет деревьев — работа стоит
+        if (sim.rng.chance(0.1)) think(c, 'Лес вырубили. Надо искать делянку дальше.');
+        c.actionData.cutProgress = LOGS_PER_TREE;
+        return;
+      }
+    }
     addStock(b, 'wood', cut);
     sim.market.flow('wood', 'лесорубы', cut);
+    return;
+  }
+  // каменоломня: камень берётся из месторождения, иссякшее — не даёт ничего
+  if (b.type === BuildingType.Quarry && c.actionData.outdoor) {
+    const want = 0.8 * hours * (hasTrait(c, Trait.Hardworking) ? 1.2 : 1);
+    const got = takeResource(sim.world, Math.round(c.x), Math.round(c.y), ResourceKind.Stone, 8, want);
+    if (got <= 0) {
+      if (sim.rng.chance(0.1)) think(c, 'Камень кончился. Каменоломня истощена.');
+      return;
+    }
+    addStock(b, 'stone', got);
+    sim.market.flow('stone', 'каменоломня', got);
     return;
   }
   // пропускная способность здания ограничена: лишние руки дают мало

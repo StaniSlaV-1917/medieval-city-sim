@@ -2,7 +2,7 @@ import { CitySize, CITY_SIZES } from '../world/generator';
 
 const RANDOM_WORDS = ['Вальдмарк', 'Хольцбург', 'Штайнфурт', 'Розенау', 'Айзенберг', 'Грюнвальд', 'Линденхоф', 'Зильберталь', 'Фалькенштайн', 'Кройцбург', 'Мондорф', 'Хиршфельд'];
 
-export function showStartScreen(root: HTMLElement, onStart: (seed: string, size: CitySize) => void, saved: { savedAt: number; load: () => void } | null = null, onImport: (() => Promise<boolean>) | null = null): void {
+export function showStartScreen(root: HTMLElement, onStart: (seed: string, size: CitySize, fog: boolean) => void, saved: { savedAt: number; load: () => void } | null = null, onImport: (() => Promise<boolean>) | null = null): void {
   const div = document.createElement('div');
   div.id = 'start';
   div.innerHTML = `
@@ -16,8 +16,9 @@ export function showStartScreen(root: HTMLElement, onStart: (seed: string, size:
       </div>
       <label for="size">Размер города</label>
       <select id="size">
-        ${(Object.keys(CITY_SIZES) as CitySize[]).map((k) => `<option value="${k}" ${k === 'medium' ? 'selected' : ''}>${CITY_SIZES[k].name} (${CITY_SIZES[k].tiles}×${CITY_SIZES[k].tiles})</option>`).join('')}
+        ${(Object.keys(CITY_SIZES) as CitySize[]).map((k) => `<option value="${k}" ${k === 'medium' ? 'selected' : ''}>${CITY_SIZES[k].name} карта (${CITY_SIZES[k].tiles}×${CITY_SIZES[k].tiles}), город ${CITY_SIZES[k].city === 128 ? 'малый' : CITY_SIZES[k].city === 160 ? 'средний' : 'большой'}</option>`).join('')}
       </select>
+      <label class="chk" style="margin-top:10px;font-weight:normal"><input type="checkbox" id="fog"> Туман неизведанного — окрестности открывают горожане и рудознатцы</label>
       <div style="margin-top:18px"><button class="btn primary" id="go" style="width:100%;font-size:18px">Основать город</button></div>
       <div class="row" style="margin-top:8px">
         ${saved ? `<button class="btn" id="cont">Продолжить (автосейв ${new Date(saved.savedAt).toLocaleString('ru-RU')})</button>` : ''}
@@ -41,8 +42,9 @@ export function showStartScreen(root: HTMLElement, onStart: (seed: string, size:
   const go = () => {
     const seed = seedInput.value.trim() || 'Вальдмарк';
     const size = sizeSel.value as CitySize;
+    const fog = div.querySelector<HTMLInputElement>('#fog')!.checked;
     div.remove();
-    onStart(seed, size);
+    onStart(seed, size, fog);
   };
   div.querySelector('#go')!.addEventListener('click', go);
   div.querySelector('#cont')?.addEventListener('click', () => {

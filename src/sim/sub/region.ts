@@ -2,6 +2,8 @@
 import type { Simulation } from '../game';
 import { Weather, createWeather, updateWeather } from '../weather';
 import { Animal, updateAnimals } from '../animals';
+import { updateNature } from '../nature';
+import '../prospect';
 
 export interface Raid {
   members: number[];
@@ -23,6 +25,11 @@ export class Region {
   epidemicMul = 1;
   lightningFlash = 0;
   shake = 0;
+  /** Нанятый рудознатец (id жителя) и срок его работы */
+  prospector = -1;
+  prospectUntil = 0;
+  /** Версия разведанной области (для перерисовки тумана) */
+  exploredVersion = 0;
 
   updateWeather(sim: Simulation): void {
     updateWeather(sim);
@@ -30,5 +37,6 @@ export class Region {
 
   updateAnimals(sim: Simulation): void {
     updateAnimals(sim);
+    updateNature(sim);
   }
 }

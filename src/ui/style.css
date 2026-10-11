@@ -269,7 +269,8 @@ kbd { background: #fbf6ea; border: 1px solid var(--border); border-radius: 3px; 
 /* ---------- Миникарта (внизу справа) ---------- */
 #minimap { position: absolute; right: 8px; bottom: 8px; padding: 4px; width: 168px; z-index: 40; }
 #minimap canvas { display: block; width: 160px; height: 160px; image-rendering: pixelated; cursor: pointer; }
-#minimap .ovbar { display: flex; gap: 2px; margin-bottom: 3px; }
+#minimap .ovbar { display: flex; flex-wrap: wrap; gap: 2px; margin-bottom: 3px; }
+#minimap .ovbar .btn { flex: 1 0 36px; }
 #minimap .ovbar .btn { flex: 1; font-size: 10px; padding: 1px 2px; }
 
 /* ---------- Уведомления ---------- */

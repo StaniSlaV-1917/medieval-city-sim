@@ -34,6 +34,46 @@ export interface Prop {
   variant: number;
   /** Блокирует ли проход */
   solid: boolean;
+  /** Тик появления (рост деревьев: пень → поросль → дерево) */
+  born?: number;
+}
+
+/** Природные ресурсы на тайле (фаза 13) */
+export const enum ResourceKind {
+  None = 0,
+  Stone = 1,
+  Iron = 2,
+  Clay = 3,
+  Salt = 4,
+  Peat = 5,
+  Berries = 6,
+  Mushrooms = 7,
+  Herbs = 8,
+  Fish = 9,
+}
+
+export const RESOURCE_NAMES: Record<number, string> = {
+  [ResourceKind.None]: '—',
+  [ResourceKind.Stone]: 'камень',
+  [ResourceKind.Iron]: 'железная руда',
+  [ResourceKind.Clay]: 'глина',
+  [ResourceKind.Salt]: 'соль',
+  [ResourceKind.Peat]: 'торф',
+  [ResourceKind.Berries]: 'ягоды',
+  [ResourceKind.Mushrooms]: 'грибы',
+  [ResourceKind.Herbs]: 'травы',
+  [ResourceKind.Fish]: 'рыба',
+};
+
+/** Скрытые ресурсы — нужно найти рудознатцем */
+export const HIDDEN_RESOURCES = new Set<number>([ResourceKind.Iron, ResourceKind.Salt]);
+
+/** Именованное угодье (участок земли, как в Manor Lords) */
+export interface Parcel {
+  id: number;
+  name: string;
+  cx: number;
+  cy: number;
 }
 
 export interface Gate {
@@ -80,6 +120,22 @@ export interface World {
   poi: POI;
   /** Направление и сила ветра (радианы, 0..1) */
   wind: { dir: number; strength: number };
+  /** Плодородие почвы 0..1 (фаза 13) */
+  fertility: Float32Array;
+  /** Вид ресурса на тайле и его остаток */
+  resource: Uint8Array;
+  resourceAmount: Uint16Array;
+  /** Ресурс обнаружен (железо и соль скрыты, пока их не найдёт рудознатец) */
+  discovered: Uint8Array;
+  /** Индекс угодья по тайлу */
+  parcel: Uint8Array;
+  parcels: Parcel[];
+  /** Туман неизведанного: 1 — тайл разведан */
+  explored: Uint8Array;
+  /** Включён ли туман (опция новой игры) */
+  fog: boolean;
+  /** Размер города (генератор) и карты */
+  cityTiles: number;
 }
 
 export function idx(world: World, x: number, y: number): number {
@@ -110,6 +166,16 @@ export function moveCost(world: World, x: number, y: number): number {
 
 export function isWalkableAt(world: World, x: number, y: number): boolean {
   return moveCost(world, x, y) !== Infinity;
+}
+
+/** Вода: река, озеро, мелководье */
+export function isWaterTile(t: Tile): boolean {
+  return t === Tile.Water || t === Tile.Shallow || t === Tile.Lake;
+}
+
+export function parcelAt(world: World, x: number, y: number): Parcel | null {
+  if (!inBounds(world, x, y) || !world.parcels.length) return null;
+  return world.parcels[world.parcel[y * world.w + x]] ?? null;
 }
 
 export function isRoadTile(t: Tile): boolean {

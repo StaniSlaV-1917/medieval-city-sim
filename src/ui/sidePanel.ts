@@ -9,13 +9,14 @@ import { HEALTH_LABELS } from '../sim/health';
 import { FIRE_LABELS } from '../sim/fire';
 import { EVENT_LABELS } from '../sim/cityEvents';
 import { BUILD_LABELS } from '../sim/construction';
+import { PROSPECT_LABELS } from '../sim/prospect';
 import { moodWord } from '../sim/needs';
 import { ORDER_DEFS, ORDER_CATEGORIES, giveOrder, OrderDef } from '../ai/orders';
 import { GOODS, GOOD_INFO } from '../economy/goods';
 import { OrderTarget, Profession, isChild } from '../sim/citizen';
 import { BuildingType } from '../world/buildings';
-import { isRoadTile, idx as tileIdx } from '../world/world';
-import { Tile } from '../world/tiles';
+import { isRoadTile, idx as tileIdx, inBounds, parcelAt, ResourceKind, RESOURCE_NAMES } from '../world/world';
+import { Tile, TILE_INFO } from '../world/tiles';
 import type { Win } from './windows';
 import { iconImg } from './icons';
 
@@ -119,8 +120,25 @@ export class SidePanel {
   }
 
   citizenTooltip(c: Citizen): string {
-    const act = c.state === 3 ? 'беседует' : (ACTION_LABELS[c.action] ?? CRIME_LABELS[c.action] ?? HEALTH_LABELS[c.action] ?? FIRE_LABELS[c.action] ?? EVENT_LABELS[c.action] ?? BUILD_LABELS[c.action] ?? '');
+    const act = c.state === 3 ? 'беседует' : (ACTION_LABELS[c.action] ?? CRIME_LABELS[c.action] ?? HEALTH_LABELS[c.action] ?? FIRE_LABELS[c.action] ?? EVENT_LABELS[c.action] ?? BUILD_LABELS[c.action] ?? PROSPECT_LABELS[c.action] ?? '');
     return `<b>${fullName(c)}</b>, ${c.age} · ${professionName(c)}<br>${act} · ${moodWord(c.mood)}<br><i>${c.thought || ''}</i>`;
+  }
+
+  /** Подсказка по тайлу земли: угодье, вид тайла, ресурс, плодородие (фаза 13) */
+  tileTooltip(x: number, y: number): string {
+    const world = this.game.sim.world;
+    if (!inBounds(world, x, y)) return '';
+    const i = tileIdx(world, x, y);
+    if (!world.explored[i]) return '<i>Неизведанные земли</i>';
+    const t = world.tiles[i] as Tile;
+    const p = parcelAt(world, x, y);
+    const parts: string[] = [];
+    if (p) parts.push(`<b>${p.name}</b>`);
+    parts.push(TILE_INFO[t].name);
+    const r = world.resource[i] as ResourceKind;
+    if (r && world.discovered[i] && world.resourceAmount[i] > 0) parts.push(`${RESOURCE_NAMES[r]}: ${world.resourceAmount[i]}`);
+    if (t === Tile.Grass || t === Tile.Meadow || t === Tile.Field || t === Tile.Pasture) parts.push(`плодородие ${Math.round(world.fertility[i] * 100)}%`);
+    return parts.join(' · ');
   }
 
   buildingTooltip(b: Building): string {
@@ -173,7 +191,7 @@ export class SidePanel {
     const portrait = this.portrait(c);
     const following = this.game.renderer.camera.follow ? 'Не следовать' : 'Следовать (F)';
     const isFav = sim.favorites.includes(c.id);
-    const status = `${professionName(c)}, ${c.age} ${ageWord(c.age)} · ${c.state === 3 ? 'беседует' : (ACTION_LABELS[c.action] ?? CRIME_LABELS[c.action] ?? HEALTH_LABELS[c.action] ?? FIRE_LABELS[c.action] ?? EVENT_LABELS[c.action] ?? BUILD_LABELS[c.action] ?? '')} · ${moodWord(c.mood)}${c.jailedUntil > this.game.sim.tick ? ' · в тюрьме' : ''}${c.flags & 2 ? ' · в розыске' : ''}${c.flags & 8 ? ' · ранен' : ''}${c.flags & 4 ? ' · болен' : ''}`;
+    const status = `${professionName(c)}, ${c.age} ${ageWord(c.age)} · ${c.state === 3 ? 'беседует' : (ACTION_LABELS[c.action] ?? CRIME_LABELS[c.action] ?? HEALTH_LABELS[c.action] ?? FIRE_LABELS[c.action] ?? EVENT_LABELS[c.action] ?? BUILD_LABELS[c.action] ?? PROSPECT_LABELS[c.action] ?? '')} · ${moodWord(c.mood)}${c.jailedUntil > this.game.sim.tick ? ' · в тюрьме' : ''}${c.flags & 2 ? ' · в розыске' : ''}${c.flags & 8 ? ' · ранен' : ''}${c.flags & 4 ? ' · болен' : ''}`;
     this.win.setTitle(fullName(c));
     const tabs = TABS.map(([k, l]) => `<button class="tab ${this.tab === k ? 'active' : ''}" data-tab="${k}">${l}</button>`).join('');
     let body = '';

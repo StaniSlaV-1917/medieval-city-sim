@@ -219,9 +219,70 @@ export class TileMapRenderer {
         }
         break;
       }
+      case Tile.Swamp: {
+        baseColor = shade(mix(pal.forestFloor, pal.waterDeep, 0.3), 0.9 + n2 * 0.15);
+        g.fillStyle = rgb(baseColor);
+        g.fillRect(px, py, T, T);
+        // лужи и кочки
+        g.fillStyle = rgb(mix(baseColor, pal.water, 0.55));
+        g.fillRect(px + ((n * 9) | 0), py + ((hash2(x, y, 41) * 9) | 0), 5, 3);
+        g.fillStyle = rgb(shade(baseColor, 1.25));
+        g.fillRect(px + ((hash2(x, y, 42) * 12) | 0), py + ((hash2(x, y, 43) * 12) | 0), 2, 2);
+        g.fillRect(px + ((hash2(x, y, 44) * 12) | 0), py + ((hash2(x, y, 45) * 12) | 0), 1, 3);
+        break;
+      }
+      case Tile.Clay: {
+        baseColor = shade([176, 110, 70], 0.9 + n2 * 0.15);
+        g.fillStyle = rgb(baseColor);
+        g.fillRect(px, py, T, T);
+        g.fillStyle = rgb(shade(baseColor, 0.78));
+        g.fillRect(px + ((n * 10) | 0), py + ((hash2(x, y, 46) * 10) | 0), 5, 3);
+        g.fillStyle = rgb(shade(baseColor, 1.15));
+        g.fillRect(px + ((hash2(x, y, 47) * 12) | 0), py + ((hash2(x, y, 48) * 12) | 0), 3, 1);
+        this.drawEdges(g, x, y, px, py, baseColor);
+        break;
+      }
+      case Tile.Salt: {
+        baseColor = shade([214, 206, 190], 0.95 + n2 * 0.1);
+        g.fillStyle = rgb(baseColor);
+        g.fillRect(px, py, T, T);
+        g.fillStyle = '#f4f0e8';
+        g.fillRect(px + ((n * 12) | 0), py + ((hash2(x, y, 49) * 12) | 0), 3, 2);
+        g.fillRect(px + ((hash2(x, y, 50) * 12) | 0), py + ((hash2(x, y, 51) * 12) | 0), 2, 2);
+        g.fillStyle = rgb(shade(baseColor, 0.85));
+        g.fillRect(px + ((hash2(x, y, 52) * 12) | 0), py + ((hash2(x, y, 53) * 12) | 0), 4, 1);
+        break;
+      }
+      case Tile.IronOre: {
+        baseColor = shade(mix(pal.rock, [150, 80, 50], 0.45), 0.9 + n2 * 0.2);
+        g.fillStyle = rgb(baseColor);
+        g.fillRect(px, py, T, T);
+        g.fillStyle = rgb(shade(baseColor, 0.7));
+        g.fillRect(px + ((n * 10) | 0), py + ((hash2(x, y, 5) * 10) | 0), 5, 3);
+        g.fillStyle = '#c86a3a';
+        g.fillRect(px + ((hash2(x, y, 54) * 12) | 0), py + ((hash2(x, y, 55) * 12) | 0), 2, 2);
+        g.fillRect(px + ((hash2(x, y, 56) * 12) | 0), py + ((hash2(x, y, 57) * 12) | 0), 2, 1);
+        g.fillStyle = rgb(shade(baseColor, 1.2));
+        g.fillRect(px + ((n * 10) | 0), py + ((hash2(x, y, 5) * 10) | 0), 5, 1);
+        break;
+      }
+      case Tile.Pasture: {
+        baseColor = shade(pal.meadow, (0.9 + n2 * 0.1) * hillK);
+        g.fillStyle = rgb(baseColor);
+        g.fillRect(px, py, T, T);
+        g.fillStyle = rgb(shade(baseColor, 0.85));
+        for (let k = 0; k < 3; k++) g.fillRect(px + ((hash2(x, y, 60 + k) * (T - 2)) | 0), py + ((hash2(x, y, 70 + k) * (T - 3)) | 0), 1, 2);
+        if (n2 > 0.75) {
+          g.fillStyle = '#6a5a40';
+          g.fillRect(px + ((hash2(x, y, 80) * 12) | 0), py + ((hash2(x, y, 81) * 12) | 0), 2, 1);
+        }
+        this.drawEdges(g, x, y, px, py, baseColor);
+        break;
+      }
       case Tile.Water:
+      case Tile.Lake:
       case Tile.Shallow: {
-        baseColor = mix(pal.waterDeep, pal.water, 0.3 + n2 * 0.5);
+        baseColor = mix(pal.waterDeep, pal.water, t === Tile.Lake ? 0.15 + n2 * 0.3 : 0.3 + n2 * 0.5);
         g.fillStyle = rgb(baseColor);
         g.fillRect(px, py, T, T);
         // блики
@@ -309,7 +370,7 @@ export class TileMapRenderer {
 
   private isWater(x: number, y: number): boolean {
     const t = this.tile(x, y);
-    return t === Tile.Water || t === Tile.Shallow;
+    return t === Tile.Water || t === Tile.Shallow || t === Tile.Lake;
   }
 
   /** Мягкие переходы: тень по краю рядом с дорогой/водой */

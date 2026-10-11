@@ -20,9 +20,15 @@ export const enum Tile {
   Quarry = 17, // каменоломня (проходима)
   Mud = 18, // грязь (трущобы)
   Meadow = 19, // луг с цветами
+  Swamp = 20, // болото (проходимо, медленно; торф)
+  Clay = 21, // глиняный карьер (проходимо)
+  IronOre = 22, // рудная жила (непроходима, как скалы)
+  Salt = 23, // солончак (проходимо)
+  Pasture = 24, // выпас
+  Lake = 25, // озеро (непроходимо)
 }
 
-export const TILE_COUNT = 20;
+export const TILE_COUNT = 26;
 
 export interface TileInfo {
   name: string;
@@ -52,6 +58,12 @@ export const TILE_INFO: Record<number, TileInfo> = {
   [Tile.Quarry]: { name: 'Каменоломня', cost: 2.5, buildable: false },
   [Tile.Mud]: { name: 'Грязь', cost: 1.4, buildable: true },
   [Tile.Meadow]: { name: 'Луг', cost: 1.7, buildable: true },
+  [Tile.Swamp]: { name: 'Болото', cost: 3.2, buildable: false },
+  [Tile.Clay]: { name: 'Глина', cost: 2.0, buildable: false },
+  [Tile.IronOre]: { name: 'Рудная жила', cost: Infinity, buildable: false },
+  [Tile.Salt]: { name: 'Солончак', cost: 1.9, buildable: false },
+  [Tile.Pasture]: { name: 'Выпас', cost: 1.7, buildable: false },
+  [Tile.Lake]: { name: 'Озеро', cost: Infinity, buildable: false },
 };
 
 export function isWalkable(t: Tile): boolean {

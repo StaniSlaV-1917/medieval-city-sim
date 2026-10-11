@@ -4,13 +4,23 @@ import { Noise2D } from '../core/noise';
 import { Tile, TILE_INFO } from './tiles';
 import { Building, BuildingType, BUILDING_DEFS, District, Material, Roof } from './buildings';
 import { World, Prop, PropType, Gate, idx, inBounds, isRoadTile, tileAt, setTile, isWalkableAt } from './world';
+import { LandCtx, genLandscape, genFertility, genResources, genParcels, initExplored } from './landscape';
 
 export type CitySize = 'small' | 'medium' | 'large';
-export const CITY_SIZES: Record<CitySize, { tiles: number; name: string }> = {
-  small: { tiles: 128, name: 'Малый' },
-  medium: { tiles: 160, name: 'Средний' },
-  large: { tiles: 192, name: 'Большой' },
+/** tiles — размер карты, city — «размер города» (радиус стен считается от него) */
+export const CITY_SIZES: Record<CitySize, { tiles: number; city: number; name: string }> = {
+  small: { tiles: 160, city: 128, name: 'Малая' },
+  medium: { tiles: 224, city: 160, name: 'Средняя' },
+  large: { tiles: 320, city: 192, name: 'Большая' },
 };
+
+export interface GenOptions {
+  /** Туман неизведанного */
+  fog?: boolean;
+  /** Переопределение размеров (для загрузки старых сохранений) */
+  mapTiles?: number;
+  cityTiles?: number;
+}
 
 const TAVERN_NAMES = [
   'Пьяный кабан', 'Золотой гусь', 'Три подковы', 'Хромая утка', 'Старый дуб', 'Весёлый мельник',
@@ -34,15 +44,18 @@ interface Ctx {
   nextBuildingId: number;
   /** Запрещённые для застройки тайлы (дороги/площадь/резерв) */
   reserved: Uint8Array;
+  /** Тайлы ручьёв: дороги через них — мосты */
+  stream: Uint8Array;
 }
 
-export function generateWorld(seedText: string, size: CitySize = 'medium'): World {
+export function generateWorld(seedText: string, size: CitySize = 'medium', opts: GenOptions = {}): World {
   const seed = hashString(seedText || 'Вальдмарк');
   const rng = new RNG(seed);
   const noise = new Noise2D(seed ^ 0x5bd1e995);
-  const W = CITY_SIZES[size].tiles;
+  const W = opts.mapTiles ?? CITY_SIZES[size].tiles;
   const H = W;
   const n = W * H;
+  const cityTiles = opts.cityTiles ?? CITY_SIZES[size].city;
   const world: World = {
     w: W,
     h: H,
@@ -71,6 +84,15 @@ export function generateWorld(seedText: string, size: CitySize = 'medium'): Worl
       riverCenterX: [],
     },
     wind: { dir: rng.float(0, Math.PI * 2), strength: rng.float(0.2, 0.6) },
+    fertility: new Float32Array(n),
+    resource: new Uint8Array(n),
+    resourceAmount: new Uint16Array(n),
+    discovered: new Uint8Array(n),
+    parcel: new Uint8Array(n),
+    parcels: [],
+    explored: new Uint8Array(n),
+    fog: false,
+    cityTiles,
   };
   world.tiles.fill(Tile.Grass);
 
@@ -82,16 +104,19 @@ export function generateWorld(seedText: string, size: CitySize = 'medium'): Worl
     H,
     cx: 0,
     cy: 0,
-    rx: 0,
-    ry: 0,
+    rx: Math.round(cityTiles * 0.215),
+    ry: Math.round(cityTiles * 0.235),
     boundary: () => 1,
     nextBuildingId: 0,
     reserved: new Uint8Array(n),
+    stream: new Uint8Array(n),
   };
 
   genTerrain(ctx);
   genRiver(ctx);
   placeCity(ctx);
+  const land: LandCtx = { world, rng, noise, cx: ctx.cx, cy: ctx.cy, rx: ctx.rx, ry: ctx.ry, stream: ctx.stream };
+  genLandscape(land);
   genWalls(ctx);
   genSquare(ctx);
   genRoads(ctx);
@@ -104,6 +129,10 @@ export function generateWorld(seedText: string, size: CitySize = 'medium'): Worl
   genGardensAndProps(ctx);
   finalizeConnectivity(ctx);
   collectPOI(ctx);
+  genFertility(land);
+  genResources(land);
+  genParcels(land);
+  initExplored(land, !!opts.fog);
   return world;
 }
 
@@ -125,7 +154,8 @@ function genTerrain(ctx: Ctx): void {
 
 function genRiver(ctx: Ctx): void {
   const { world, rng, noise, W, H } = ctx;
-  const x0 = W * rng.float(0.2, 0.3);
+  // река проходит западнее будущего города
+  const x0 = W * 0.5 - ctx.rx * 1.3 - rng.float(8, 16);
   const a1 = rng.float(4, 8);
   const l1 = rng.float(28, 46);
   const p1 = rng.float(0, Math.PI * 2);
@@ -150,10 +180,10 @@ function genRiver(ctx: Ctx): void {
 
 function placeCity(ctx: Ctx): void {
   const { world, rng, noise, W, H } = ctx;
-  const rx = Math.round(W * 0.215);
-  const ry = Math.round(H * 0.235);
+  const rx = ctx.rx;
+  const ry = ctx.ry;
   let cy = Math.round(H * 0.5 + rng.float(-4, 4));
-  let cx = Math.round(W * 0.58);
+  let cx = Math.round(W * 0.5 + rng.float(-W * 0.02, W * 0.02));
   // Река не должна пересекать стены
   let riverMax = 0;
   for (let y = cy - ry - 4; y <= cy + ry + 4; y++) {
@@ -327,8 +357,13 @@ function carveTile(ctx: Ctx, x: number, y: number, t: Tile, overwriteBuildings =
   if (!inBounds(world, x, y)) return;
   const i = idx(world, x, y);
   const cur = world.tiles[i] as Tile;
-  if (cur === Tile.Water || cur === Tile.Shallow) {
-    if (t === Tile.Bridge) world.tiles[i] = Tile.Bridge;
+  if (cur === Tile.Water || cur === Tile.Shallow || cur === Tile.Lake) {
+    if (t === Tile.Bridge || (ctx.stream[i] && (t === Tile.Dirt || t === Tile.Road))) world.tiles[i] = Tile.Bridge;
+    return;
+  }
+  if (cur === Tile.Swamp && t === Tile.Dirt) {
+    world.tiles[i] = Tile.Dirt;
+    ctx.reserved[i] = 1;
     return;
   }
   if (cur === Tile.Wall || cur === Tile.Tower) return;
@@ -634,7 +669,7 @@ function genHill(ctx: Ctx): void {
       const dy = (y - hy) * 1.1;
       const d = Math.sqrt(dx * dx + dy * dy) / r;
       const h = Math.max(0, 1 - d * d) * (0.85 + noise.value(x / 6, y / 6) * 0.3);
-      world.height[y * W + x] = Math.min(1, h);
+      world.height[y * W + x] = Math.min(1, Math.max(world.height[y * W + x], h));
     }
 }
 

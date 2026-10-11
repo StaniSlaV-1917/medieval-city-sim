@@ -11,6 +11,11 @@ import { WORKPLACE_PROFESSIONS } from '../src/data/professions';
 import { EDICT_DEFS } from '../src/data/edicts';
 import { BUILDING_DEFS } from '../src/world/buildings';
 import { Profession } from '../src/sim/citizen';
+import { isWalkableAt as walkable } from '../src/world/world';
+import { Pathfinder } from '../src/world/pathfinding';
+import { hireProspector } from '../src/sim/prospect';
+import { PropType } from '../src/world/world';
+import { Tile } from '../src/world/tiles';
 import { dialogueLineCount } from '../src/ai/dialogue';
 import { layoutBubbles, BubbleItem } from '../src/render/bubbleLayout';
 import { RNG } from '../src/core/rng';
@@ -78,6 +83,8 @@ for (const c of cases) {
     check(Number.isFinite(cz.x) && Number.isFinite(cz.y), `NaN в стартовой позиции жителя ${cz.id}`);
   }
   const money0 = sim.totalMoney();
+  let forest0 = 0;
+  for (let i = 0; i < world.w * world.h; i++) if (world.tiles[i] === Tile.Forest) forest0++;
   const pop0 = sim.citizens.filter((z) => z.alive).length;
   if (sim.citizens.length === 0) console.log('  (население появится в фазе 1)');
   else check(pop0 > 50, `слишком маленькое население: ${pop0}`);
@@ -130,9 +137,102 @@ for (const c of cases) {
   check(st.avgHunger >= 40, `город голодает: средняя сытость ${st.avgHunger.toFixed(0)}`);
   check(st.avgHealth >= 70, `город болеет: среднее здоровье ${st.avgHealth.toFixed(0)}`);
   for (const b of world.buildings) for (const [k, v] of Object.entries(b.storage)) check(Number.isFinite(v) && v >= -0.01, `запас ${k} в здании ${b.id} = ${v}`);
+  // Природа (фаза 13): ресурсы не уходят в минус, лес не исчезает, пни от вырубки появляются
+  let negRes = 0;
+  let forestNow = 0;
+  for (let i = 0; i < world.w * world.h; i++) {
+    if (world.resourceAmount[i] < 0 || !Number.isFinite(world.fertility[i])) negRes++;
+    if (world.tiles[i] === Tile.Forest) forestNow++;
+  }
+  check(negRes === 0, `тайлов с отрицательным ресурсом/NaN плодородием: ${negRes}`);
+  check(forestNow >= forest0 * 0.9, `лес исчезает: было ${forest0} тайлов, стало ${forestNow}`);
+  const stumps = world.props.filter((p) => p.type === PropType.Stump && p.born !== undefined).length;
+  if (c.days >= 3) check(stumps > 0, 'лесорубы работали, а пней от вырубки нет');
+  check(world.parcels.length >= 8 && new Set(world.parcels.map((p) => p.name)).size === world.parcels.length, 'угодья: мало или имена повторяются');
+  const game = sim.animals.filter((a) => a.alive && (a.kind === 5 || a.kind === 6)).length;
+  check(game > 0, 'в лесах нет дичи');
+  console.log(`  природа: лес ${forest0}→${forestNow}, пней ${stumps}, дичи ${game}, угодий ${world.parcels.length}`);
   console.log(`  население ${popEnd}, деньги ${money1.toFixed(0)}, ср. сытость ${st.avgHunger.toFixed(0)}, ср. здоровье ${st.avgHealth.toFixed(0)}, макс. застревание ${maxStuck} тиков`);
   console.log(`  событий в хронике: ${sim.chronicle.events.length}; A*: ${sim.pathfinder.stats.searches} поисков, ${sim.pathfinder.stats.cacheHits} из кэша`);
   for (const e of sim.chronicle.events.slice(-5)) console.log(`    · ${e.text}`);
+}
+
+// ---------------------------------------------------------------- Большая карта (фаза 13)
+{
+  console.log('\n=== Большая карта: HPA*, туман, рудознатец ===');
+  const sim = new Simulation({ seedText: 'большая-карта', size: 'large', fog: true });
+  const world = sim.world;
+  check(world.w === 320, `большая карта должна быть 320 тайлов, а не ${world.w}`);
+  // HPA*: дальние пути валидны и находятся там, где находит обычный A*
+  const plain = new Pathfinder(world);
+  plain.hpa = null;
+  const rng = new RNG(11);
+  const reach = sim.pathfinder.reachableMask(world.poi.wellX, world.poi.wellY + 1);
+  const pts: number[] = [];
+  for (let i = 0; i < reach.length; i++) if (reach[i]) pts.push(i);
+  let tested = 0;
+  let invalid = 0;
+  let missing = 0;
+  let ratio = 0;
+  const t0 = Date.now();
+  while (tested < 60) {
+    const a = pts[rng.int(0, pts.length - 1)];
+    const b = pts[rng.int(0, pts.length - 1)];
+    const ax = a % world.w;
+    const ay = (a / world.w) | 0;
+    const bx = b % world.w;
+    const by = (b / world.w) | 0;
+    if (Math.max(Math.abs(ax - bx), Math.abs(ay - by)) < 70) continue;
+    tested++;
+    const p = sim.pathfinder.find(ax, ay, bx, by);
+    const q = plain.find(ax, ay, bx, by);
+    if (!p) {
+      if (q) missing++;
+      continue;
+    }
+    let px = ax;
+    let py = ay;
+    let ok = p[p.length - 1] === b;
+    for (const i of p) {
+      const x = i % world.w;
+      const y = (i / world.w) | 0;
+      if (Math.abs(x - px) > 1 || Math.abs(y - py) > 1 || !walkable(world, x, y)) ok = false;
+      px = x;
+      py = y;
+    }
+    if (!ok) invalid++;
+    if (q) ratio += p.length / q.length;
+  }
+  check(invalid === 0, `HPA*: невалидных путей ${invalid} из ${tested}`);
+  check(missing === 0, `HPA*: не нашёл ${missing} путей, которые находит A*`);
+  check(ratio / tested < 1.15, `HPA*: пути слишком длинные (×${(ratio / tested).toFixed(2)} от A*)`);
+  console.log(`  HPA*: ${tested} дальних путей за ${Date.now() - t0} мс, длина ×${(ratio / tested).toFixed(3)} от A*`);
+  // Туман: разведанная доля растёт, рудознатец находит скрытые ресурсы
+  const explored = (): number => {
+    let n = 0;
+    for (let i = 0; i < world.explored.length; i++) n += world.explored[i];
+    return n / world.explored.length;
+  };
+  const e0 = explored();
+  check(e0 > 0.05 && e0 < 0.9, `туман: стартовая разведка ${(e0 * 100).toFixed(0)}% — ожидается город и окрестности`);
+  sim.treasury += 100;
+  const msg = hireProspector(sim);
+  check(sim.region.prospector >= 0, `рудознатец не нанят: ${msg}`);
+  let hidden0 = 0;
+  for (let i = 0; i < world.resource.length; i++) if ((world.resource[i] === 2 || world.resource[i] === 4) && !world.discovered[i]) hidden0++;
+  for (let t = 0; t < TICKS_PER_DAY * 2; t++) sim.step();
+  let hidden1 = 0;
+  for (let i = 0; i < world.resource.length; i++) if ((world.resource[i] === 2 || world.resource[i] === 4) && !world.discovered[i]) hidden1++;
+  const e1 = explored();
+  check(e1 > e0, `туман не рассеивается: ${(e0 * 100).toFixed(1)}% → ${(e1 * 100).toFixed(1)}%`);
+  check(hidden0 > 0, 'на большой карте нет скрытых месторождений');
+  console.log(`  туман: ${(e0 * 100).toFixed(0)}% → ${(e1 * 100).toFixed(0)}%, скрытых ресурсов ${hidden0} → ${hidden1}${hidden1 < hidden0 ? ' (рудознатец нашёл жилу)' : ''}`);
+  warn(hidden1 < hidden0, 'рудознатец за два дня ничего не нашёл (случайность, но стоит проверить)');
+  // Цикл сериализации сохраняет природу
+  const again = deserialize(serialize(sim));
+  let same = true;
+  for (let i = 0; i < world.resource.length; i += 97) if (again.world.resource[i] !== world.resource[i] || again.world.resourceAmount[i] !== world.resourceAmount[i] || again.world.explored[i] !== world.explored[i]) same = false;
+  check(same && again.world.parcels.length === world.parcels.length && again.world.fog, 'природные данные и туман не сохраняются');
 }
 
 // ---------------------------------------------------------------- Сохранения

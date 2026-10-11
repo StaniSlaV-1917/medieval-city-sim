@@ -2,8 +2,9 @@
 import { Simulation } from '../sim/game';
 import type { Citizen } from '../sim/citizen';
 import type { World } from '../world/world';
+import { regenerateNature } from '../world/landscape';
 
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 
 /**
  * Цепочка миграций: migrate_N_to_N+1 приводит сохранение версии N к версии N+1.
@@ -21,6 +22,17 @@ export const MIGRATIONS: Record<number, (d: Plain) => void> = {
     if (Array.isArray(d.talks)) for (const [, t] of d.talks as [number, Plain][]) if (!Array.isArray(t.history)) t.history = [];
     if (typeof d.famine !== 'boolean') d.famine = false;
     d.version = 2;
+  },
+  // 2 → 3 (фаза 13): размеры карты и города хранятся явно; природные ресурсы, угодья и туман
+  // для старых карт генерируются заново при загрузке (deserialize), здесь — только поля
+  2: (d) => {
+    const w = (d.world ?? {}) as Plain;
+    if (typeof w.cityTiles !== 'number') w.cityTiles = w.w;
+    if (typeof w.fog !== 'boolean') w.fog = false;
+    const r = (d.region ?? {}) as Plain;
+    if (typeof r.prospector !== 'number') r.prospector = -1;
+    d.region = r;
+    d.version = 3;
   },
 };
 
@@ -62,6 +74,15 @@ export function serialize(sim: Simulation): string {
     props: w.props,
     poi: w.poi,
     wind: w.wind,
+    cityTiles: w.cityTiles,
+    fog: w.fog,
+    fertility: typedToArray(w.fertility).map((v) => Math.round(v * 100) / 100),
+    resource: typedToArray(w.resource),
+    resourceAmount: typedToArray(w.resourceAmount),
+    discovered: typedToArray(w.discovered),
+    parcel: typedToArray(w.parcel),
+    parcels: w.parcels,
+    explored: typedToArray(w.explored),
   };
   const citizens = sim.citizens.map((c) => ({ ...c, relations: [...c.relations.entries()], path: null, pathIdx: 0 }));
   const data = {
@@ -107,6 +128,7 @@ export function serialize(sim: Simulation): string {
     flood: sim.flood,
     dragon: sim.dragon,
     guardTarget: sim.guardTarget,
+    region: { prospector: sim.region.prospector, prospectUntil: sim.region.prospectUntil },
     favorites: sim.favorites,
     famine: sim.famine,
     pendingWedding: sim.pendingWedding,
@@ -118,9 +140,9 @@ export function serialize(sim: Simulation): string {
 
 export function deserialize(json: string): Simulation {
   const d = migrateSave(JSON.parse(json) as Plain);
-  const sim = new Simulation({ seedText: d.seedText as string, size: d.size as 'small' | 'medium' | 'large', skipPopulation: true });
-  const w = sim.world;
   const sw = d.world as Plain;
+  const sim = new Simulation({ seedText: d.seedText as string, size: d.size as 'small' | 'medium' | 'large', skipPopulation: true, mapTiles: sw.w as number, cityTiles: sw.cityTiles as number, fog: sw.fog as boolean });
+  const w = sim.world;
   w.tiles.set(sw.tiles as number[]);
   w.height.set(sw.height as number[]);
   w.district.set(sw.district as number[]);
@@ -134,6 +156,20 @@ export function deserialize(json: string): Simulation {
   w.props.forEach((p, i) => {
     if (p.solid) w.solidProp[p.y * w.w + p.x] = i;
   });
+  w.cityTiles = (sw.cityTiles as number) ?? w.w;
+  w.fog = sw.fog === true;
+  if (Array.isArray(sw.fertility) && Array.isArray(sw.resource)) {
+    w.fertility.set(sw.fertility as number[]);
+    w.resource.set(sw.resource as number[]);
+    w.resourceAmount.set(sw.resourceAmount as number[]);
+    w.discovered.set(sw.discovered as number[]);
+    w.parcel.set(sw.parcel as number[]);
+    w.parcels = sw.parcels as World['parcels'];
+    w.explored.set(sw.explored as number[]);
+  } else {
+    // старая карта без природы: достроить ландшафтные данные по загруженному миру
+    regenerateNature(w);
+  }
   sim.citizens = (d.citizens as Plain[]).map((c) => {
     const z = { ...c } as unknown as Citizen;
     z.relations = new Map(c.relations as [number, number][]);
@@ -185,6 +221,9 @@ export function deserialize(json: string): Simulation {
   sim.dragon = d.dragon as typeof sim.dragon;
   sim.guardTarget = d.guardTarget as number;
   sim.favorites = Array.isArray(d.favorites) ? (d.favorites as number[]) : [];
+  const reg = (d.region ?? {}) as Plain;
+  sim.region.prospector = typeof reg.prospector === 'number' ? reg.prospector : -1;
+  sim.region.prospectUntil = typeof reg.prospectUntil === 'number' ? reg.prospectUntil : 0;
   sim.famine = d.famine === true;
   sim.pendingWedding = d.pendingWedding as typeof sim.pendingWedding;
   sim.buildingVersion = (d.buildingVersion as number) + 1;

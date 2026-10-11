@@ -6,6 +6,7 @@ import { BuildingType } from '../world/buildings';
 import { isNight } from '../core/time';
 import { EventKind } from '../events/chronicle';
 import { dist2 } from '../core/math';
+import { spawnGame } from './nature';
 
 export const enum AnimalKind {
   Dog = 0,
@@ -13,6 +14,8 @@ export const enum AnimalKind {
   Chicken = 2,
   Bird = 3,
   Wolf = 4,
+  Deer = 5,
+  Boar = 6,
 }
 
 export interface Animal {
@@ -45,6 +48,11 @@ export function createAnimals(sim: Simulation): void {
     if (b.type === BuildingType.Shack && rng.chance(0.15)) sim.animals.push(mk(AnimalKind.Chicken, b.x - 1, b.y + b.h));
   }
   for (let k = 0; k < 10; k++) sim.animals.push(mk(AnimalKind.Bird, rng.int(0, world.w), rng.int(0, world.h)));
+  // дичь на опушках
+  let forest = 0;
+  for (let i = 0; i < world.w * world.h; i++) if (world.tiles[i] === Tile.Forest) forest++;
+  const game = Math.max(4, Math.min(36, Math.round(forest / 500)));
+  for (let k = 0; k < game; k++) spawnGame(sim);
 }
 
 function mk(kind: AnimalKind, x: number, y: number): Animal {
@@ -94,18 +102,40 @@ export function updateAnimals(sim: Simulation): void {
     const dx = a.tx - a.x;
     const dy = a.ty - a.y;
     const d = Math.hypot(dx, dy);
-    const speed = a.kind === AnimalKind.Wolf ? 0.3 : a.kind === AnimalKind.Chicken ? 0.08 : 0.18;
+    const speed = a.kind === AnimalKind.Wolf ? 0.3 : a.kind === AnimalKind.Chicken ? 0.08 : a.kind === AnimalKind.Deer ? 0.22 : 0.18;
+    // дичь пугается людей: убегает от ближайшего прохожего
+    if ((a.kind === AnimalKind.Deer || a.kind === AnimalKind.Boar) && tick % 10 === 0) {
+      let near: { x: number; y: number } | null = null;
+      for (const c of sim.citizens) {
+        if (!c.alive || c.inside >= 0) continue;
+        if (dist2(c.x, c.y, a.x, a.y) < 25) {
+          near = c;
+          break;
+        }
+      }
+      if (near) {
+        const fx = Math.round(a.x + (a.x - near.x) * 2 + rng.float(-2, 2));
+        const fy = Math.round(a.y + (a.y - near.y) * 2 + rng.float(-2, 2));
+        if (isWalkableAt(world, fx, fy) && !world.inside[idx(world, fx, fy)]) {
+          a.tx = fx;
+          a.ty = fy;
+          a.homeX = fx;
+          a.homeY = fy;
+          a.wait = 0;
+        }
+      }
+    }
     if (d < speed) {
       a.x = a.tx;
       a.y = a.ty;
       a.wait = rng.int(10, a.kind === AnimalKind.Cat ? 200 : 80);
       // новая цель
-      const r = a.kind === AnimalKind.Wolf ? 14 : a.kind === AnimalKind.Chicken ? 2 : 6;
+      const r = a.kind === AnimalKind.Wolf ? 14 : a.kind === AnimalKind.Chicken ? 2 : a.kind === AnimalKind.Deer || a.kind === AnimalKind.Boar ? 5 : 6;
       for (let k = 0; k < 6; k++) {
         const nx = Math.round(a.homeX + rng.float(-r, r));
         const ny = Math.round(a.homeY + rng.float(-r, r));
         if (!isWalkableAt(world, nx, ny)) continue;
-        if (a.kind === AnimalKind.Wolf && world.inside[idx(world, nx, ny)]) continue;
+        if ((a.kind === AnimalKind.Wolf || a.kind === AnimalKind.Deer || a.kind === AnimalKind.Boar) && world.inside[idx(world, nx, ny)]) continue;
         if (a.kind === AnimalKind.Dog && world.tiles[idx(world, nx, ny)] === Tile.Field) continue;
         a.tx = nx;
         a.ty = ny;
