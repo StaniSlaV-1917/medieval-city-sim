@@ -51,7 +51,7 @@ export function serialize(sim: Simulation): string {
     importCost: sim.importCost,
     chronicle: sim.chronicle.events,
     history: sim.history,
-    market: { prices: sim.market.prices, yearFactor: sim.market.yearFactor, soldToday: sim.market.soldToday, soldYesterday: sim.market.soldYesterday },
+    market: { prices: sim.market.prices, yearFactor: sim.market.yearFactor, soldToday: sim.market.soldToday, soldYesterday: sim.market.soldYesterday, dayStartStock: sim.market.dayStartStock, flowsToday: sim.market.flowsToday, flowsYesterday: sim.market.flowsYesterday },
     weather: sim.weather,
     fires: sim.fires,
     funerals: sim.funerals,
@@ -75,6 +75,7 @@ export function serialize(sim: Simulation): string {
     flood: sim.flood,
     dragon: sim.dragon,
     guardTarget: sim.guardTarget,
+    favorites: sim.favorites,
     pendingWedding: sim.pendingWedding,
     buildingVersion: sim.buildingVersion,
     tileVersion: sim.tileVersion,
@@ -125,6 +126,9 @@ export function deserialize(json: string): Simulation {
   sim.market.yearFactor = m.yearFactor as number;
   Object.assign(sim.market.soldToday, m.soldToday as Plain);
   Object.assign(sim.market.soldYesterday, m.soldYesterday as Plain);
+  if (m.dayStartStock) sim.market.restoreDayStart(m.dayStartStock as Record<string, number> as typeof sim.market.dayStartStock);
+  if (m.flowsToday) sim.market.flowsToday = m.flowsToday as typeof sim.market.flowsToday;
+  if (m.flowsYesterday) sim.market.flowsYesterday = m.flowsYesterday as typeof sim.market.flowsYesterday;
   Object.assign(sim.weather, d.weather as Plain);
   sim.fires = d.fires as typeof sim.fires;
   sim.funerals = d.funerals as typeof sim.funerals;
@@ -148,6 +152,7 @@ export function deserialize(json: string): Simulation {
   sim.flood = d.flood as typeof sim.flood;
   sim.dragon = d.dragon as typeof sim.dragon;
   sim.guardTarget = d.guardTarget as number;
+  sim.favorites = Array.isArray(d.favorites) ? (d.favorites as number[]) : [];
   sim.pendingWedding = d.pendingWedding as typeof sim.pendingWedding;
   sim.buildingVersion = (d.buildingVersion as number) + 1;
   sim.tileVersion = (d.tileVersion as number) + 1;

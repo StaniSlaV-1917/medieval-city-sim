@@ -20,6 +20,7 @@ export function dailyTrade(sim: Simulation): void {
     const sum = Math.round(surplus * price);
     wh.storage[g] = have - surplus;
     income += sum;
+    sim.market.flow(g, 'вывоз за город', -surplus);
   }
   if (income > 0) {
     if (owner && owner.alive) owner.money += income;
@@ -46,6 +47,7 @@ export function dailyTrade(sim: Simulation): void {
       sim.moneyDestroyed += cost;
       sim.importCost += cost;
       wh.storage['grain'] = (wh.storage['grain'] ?? 0) + q;
+      sim.market.flow('grain', 'ввоз из-за реки', q);
       sim.chronicle.log(sim.tick, EventKind.Economy, `Купец ${owner.firstName} ${owner.lastName} завёз ${q} мер зерна из-за реки: в городе не хватает хлеба.`, wh.doorX, wh.doorY, [owner.id], 0.5);
     }
   }

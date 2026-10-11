@@ -16,9 +16,15 @@ import { OrderTarget, Profession, isChild } from '../sim/citizen';
 import { BuildingType } from '../world/buildings';
 import { isRoadTile, idx as tileIdx } from '../world/world';
 import { Tile } from '../world/tiles';
+import type { Win } from './windows';
+import { iconImg } from './icons';
+
+type CardTab = 'overview' | 'family' | 'relations' | 'memory' | 'orders';
+const TABS: [CardTab, string][] = [['overview', 'Обзор'], ['family', 'Семья'], ['relations', 'Отношения'], ['memory', 'Память'], ['orders', 'Приказы']];
 
 export class SidePanel {
   el: HTMLElement;
+  win: Win;
   private game: Game;
   private mode: 'none' | 'citizen' | 'building' = 'none';
   private id = -1;
@@ -26,17 +32,27 @@ export class SidePanel {
   private orderCat: OrderDef['category'] | null = null;
   private pendingOrder: OrderDef | null = null;
   private reaction = '';
+  tab: CardTab = 'overview';
 
-  constructor(root: HTMLElement, game: Game) {
+  constructor(win: Win, game: Game) {
     this.game = game;
-    this.el = document.createElement('div');
-    this.el.id = 'side';
-    this.el.className = 'panel';
-    root.appendChild(this.el);
+    this.win = win;
+    this.el = win.body;
+    this.el.classList.add('card');
     this.el.addEventListener('click', (e) => {
       const t = e.target as HTMLElement;
-      if (t.classList.contains('close')) this.game.deselect();
-      const cid = t.getAttribute('data-citizen');
+      const tabBtn = t.closest<HTMLElement>('[data-tab]');
+      if (tabBtn) {
+        this.tab = tabBtn.dataset.tab as CardTab;
+        this.renderCitizen();
+        return;
+      }
+      if (t.closest('.fav')) {
+        this.game.toggleFavorite(this.id);
+        this.renderCitizen();
+        return;
+      }
+      const cid = t.getAttribute('data-citizen') ?? t.closest<HTMLElement>('[data-citizen]')?.dataset.citizen ?? null;
       if (cid) this.game.selectCitizen(Number(cid), true);
       const bid = t.getAttribute('data-building');
       if (bid) {
@@ -70,23 +86,27 @@ export class SidePanel {
     }
     this.mode = 'citizen';
     this.id = id;
-    this.el.style.display = 'block';
+    this.win.show();
     this.renderCitizen();
   }
 
   showBuilding(id: number): void {
     this.mode = 'building';
     this.id = id;
-    this.el.style.display = 'block';
+    this.win.show();
     this.renderBuilding();
   }
 
   hide(): void {
     this.mode = 'none';
-    this.el.style.display = 'none';
+    this.win.close();
     this.pendingOrder = null;
     this.reaction = '';
     this.game.targeting = null;
+  }
+
+  get visible(): boolean {
+    return this.mode !== 'none' && this.win.open;
   }
 
   update(): void {
@@ -152,11 +172,14 @@ export class SidePanel {
       .join(', ');
     const portrait = this.portrait(c);
     const following = this.game.renderer.camera.follow ? 'Не следовать' : 'Следовать (F)';
-    this.el.innerHTML = `
-      <button class="close" title="Закрыть (Esc)">✕</button>
-      ${portrait}
-      <h2>${fullName(c)}</h2>
-      <div class="sub">${professionName(c)}, ${c.age} ${ageWord(c.age)} · ${c.state === 3 ? 'беседует' : (ACTION_LABELS[c.action] ?? CRIME_LABELS[c.action] ?? HEALTH_LABELS[c.action] ?? FIRE_LABELS[c.action] ?? EVENT_LABELS[c.action] ?? BUILD_LABELS[c.action] ?? '')} · ${moodWord(c.mood)}${c.jailedUntil > this.game.sim.tick ? ' · в тюрьме' : ''}${c.flags & 2 ? ' · в розыске' : ''}${c.flags & 8 ? ' · ранен' : ''}${c.flags & 4 ? ' · болен' : ''}</div>
+    const isFav = sim.favorites.includes(c.id);
+    const status = `${professionName(c)}, ${c.age} ${ageWord(c.age)} · ${c.state === 3 ? 'беседует' : (ACTION_LABELS[c.action] ?? CRIME_LABELS[c.action] ?? HEALTH_LABELS[c.action] ?? FIRE_LABELS[c.action] ?? EVENT_LABELS[c.action] ?? BUILD_LABELS[c.action] ?? '')} · ${moodWord(c.mood)}${c.jailedUntil > this.game.sim.tick ? ' · в тюрьме' : ''}${c.flags & 2 ? ' · в розыске' : ''}${c.flags & 8 ? ' · ранен' : ''}${c.flags & 4 ? ' · болен' : ''}`;
+    this.win.setTitle(fullName(c));
+    const tabs = TABS.map(([k, l]) => `<button class="tab ${this.tab === k ? 'active' : ''}" data-tab="${k}">${l}</button>`).join('');
+    let body = '';
+    switch (this.tab) {
+      case 'overview':
+        body = `
       <div class="thought">«${c.thought || '…'}»</div>
       <div class="traits">${traits}</div>
       <div class="section"><h3>Потребности</h3>${needs}</div>
@@ -166,12 +189,75 @@ export class SidePanel {
         <div>Работа: ${work}</div>
         <div>Инвентарь: ${inv || 'пусто'}</div>
       </div>
-      <div class="section"><h3>Семья</h3>${fam.length ? fam.join('<br>') : 'одинок(а)'}</div>
-      <div class="section"><h3>Отношения</h3>${rels || 'пока ни с кем не знаком(а)'}</div>
-      <div class="section"><h3>Память</h3><div class="bio">${mems || 'ничего примечательного'}</div></div>
-      <div class="section"><h3>Биография</h3><div class="bio">${bio || '—'}</div></div>
-      <div class="actions"><button class="btn small" id="follow">${following}</button></div>
-      ${this.ordersHtml(c)}`;
+      <div class="section"><h3>Семья</h3>${fam.length ? fam.join('<br>') : 'одинок(а)'}</div>`;
+        break;
+      case 'family':
+        body = this.familyHtml(c);
+        break;
+      case 'relations':
+        body = `<div class="section"><h3>Отношения</h3>${rels || 'пока ни с кем не знаком(а)'}</div>`;
+        break;
+      case 'memory':
+        body = `<div class="section"><h3>Память</h3><div class="bio tall">${mems || 'ничего примечательного'}</div></div>
+      <div class="section"><h3>Биография</h3><div class="bio tall">${bio || '—'}</div></div>`;
+        break;
+      case 'orders':
+        body = this.ordersHtml(c);
+        break;
+    }
+    const scroll = this.el.scrollTop;
+    this.el.innerHTML = `
+      <div class="head">
+        ${portrait}
+        <div class="sub">${status}</div>
+        <div class="hbtns"><button class="btn small fav ${isFav ? 'on' : ''}" data-tip="${isFav ? 'Убрать из избранного' : 'В избранное (появится в Обзоре справа)'}">${iconImg('star', 12)} ${isFav ? 'В избранном' : 'В избранное'}</button><button class="btn small" id="follow">${following}</button></div>
+      </div>
+      <div class="tabs">${tabs}</div>
+      ${body}`;
+    this.el.scrollTop = scroll;
+  }
+
+  /** Родословное дерево: деды — родители и их братья/сёстры — сам житель с супругом и братьями — дети — внуки */
+  private familyHtml(c: Citizen): string {
+    const sim = this.game.sim;
+    const get = (id: number): Citizen | undefined => sim.citizens[id];
+    const box = (id: number, role: string, self = false): string => {
+      const p = get(id);
+      if (!p) return '';
+      const dead = !p.alive;
+      return `<div class="fbox ${self ? 'self' : ''} ${dead ? 'dead' : ''}" data-citizen="${id}" data-tip="${fullName(p)}, ${p.age} ${ageWord(p.age)} — ${professionName(p)}${dead ? ' (умер' + (p.sex === 'f' ? 'ла' : '') + ')' : ''}"><div class="fn">${p.firstName}${dead ? ' †' : ''}</div><div class="fr">${role}</div></div>`;
+    };
+    const row = (title: string, boxes: string): string => (boxes ? `<div class="frow"><div class="ft">${title}</div><div class="fb">${boxes}</div></div>` : '');
+    const parents = c.parents.filter((id) => get(id));
+    const grand: number[] = [];
+    for (const pid of parents) for (const g of get(pid)!.parents) if (get(g) && !grand.includes(g)) grand.push(g);
+    const siblings: number[] = [];
+    for (const pid of parents) for (const k of get(pid)!.children) if (k !== c.id && get(k) && !siblings.includes(k)) siblings.push(k);
+    const kids = c.children.filter((id) => get(id));
+    const grandkids: number[] = [];
+    for (const k of kids) for (const g of get(k)!.children) if (get(g) && !grandkids.includes(g)) grandkids.push(g);
+    const roleP = (p: Citizen): string => (p.sex === 'm' ? 'отец' : 'мать');
+    const roleG = (p: Citizen): string => (p.sex === 'm' ? 'дед' : 'бабка');
+    const roleS = (p: Citizen): string => (p.sex === 'm' ? 'брат' : 'сестра');
+    const roleK = (p: Citizen): string => (p.sex === 'm' ? 'сын' : 'дочь');
+    const roleGK = (p: Citizen): string => (p.sex === 'm' ? 'внук' : 'внучка');
+    let selfRow = box(c.id, c.sex === 'm' ? (c.spouse >= 0 ? 'муж' : 'он сам') : c.spouse >= 0 ? 'жена' : 'она сама', true);
+    if (c.spouse >= 0 && get(c.spouse)) selfRow += box(c.spouse, c.sex === 'm' ? 'жена' : 'муж');
+    for (const sId of siblings) selfRow += box(sId, roleS(get(sId)!));
+    let kidsRow = '';
+    for (const k of kids) {
+      kidsRow += box(k, roleK(get(k)!));
+      const sp = get(k)!.spouse;
+      if (sp >= 0 && get(sp)) kidsRow += box(sp, get(sp)!.sex === 'm' ? 'зять' : 'невестка');
+    }
+    const tree =
+      row('Деды', grand.map((id) => box(id, roleG(get(id)!))).join('')) +
+      row('Родители', parents.map((id) => box(id, roleP(get(id)!))).join('')) +
+      row('Семья', selfRow) +
+      row('Дети', kidsRow) +
+      row('Внуки', grandkids.map((id) => box(id, roleGK(get(id)!))).join(''));
+    const alone = !grand.length && !parents.length && !siblings.length && !kids.length && c.spouse < 0;
+    return `<div class="section"><h3>Родословная</h3><div class="tree">${tree}</div>${alone ? '<div class="muted">Родни в городе нет — приехал(а) один(одна).</div>' : '<div class="muted small">Клик по карточке — перейти к родственнику. † — умер.</div>'}</div>`;
   }
 
   private onOrderClick(id: string): void {
@@ -320,9 +406,8 @@ export class SidePanel {
       .join(', ');
     const revenue = b.storage['revenue'] ? `<div>Выручка за всё время: ${Math.round(b.storage['revenue'])} монет</div>` : '';
     const owner = b.owner >= 0 && sim.citizens[b.owner]?.alive ? this.link(b.owner) : '—';
+    this.win.setTitle(b.name ? `«${b.name}»` : def.name);
     this.el.innerHTML = `
-      <button class="close" title="Закрыть (Esc)">✕</button>
-      <h2>${b.name ? `«${b.name}»` : def.name}</h2>
       <div class="sub">${b.name ? def.name + ' · ' : ''}${DISTRICT_NAMES[b.district]} · ${MATERIAL_NAMES[b.material]}, крыша — ${ROOF_NAMES[b.roof]}</div>
       <div class="section"><h3>Состояние</h3>
         <div class="bar"><span class="name">Целостность</span><div class="track"><div class="fill" style="width:${Math.round(b.condition * 100)}%"></div></div><span class="val">${Math.round(b.condition * 100)}</span></div>

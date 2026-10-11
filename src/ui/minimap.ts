@@ -1,6 +1,7 @@
 import type { Game } from '../main';
 import { Tile } from '../world/tiles';
 import { TILE } from '../render/camera';
+import { OVERLAY_NAMES } from '../render/overlays';
 
 export class Minimap {
   el: HTMLElement;
@@ -9,12 +10,14 @@ export class Minimap {
   private game: Game;
   private version = -1;
   private scale = 1;
+  private ovBtns: HTMLButtonElement[] = [];
 
   constructor(root: HTMLElement, game: Game) {
     this.game = game;
     this.el = document.createElement('div');
     this.el.id = 'minimap';
     this.el.className = 'panel';
+    this.el.dataset.fixed = '1';
     const w = game.sim.world.w;
     this.scale = 160 / w;
     this.canvas = document.createElement('canvas');
@@ -23,6 +26,23 @@ export class Minimap {
     this.base = document.createElement('canvas');
     this.base.width = w;
     this.base.height = game.sim.world.h;
+    const bar = document.createElement('div');
+    bar.className = 'ovbar';
+    const ovs: ('none' | 'crime' | 'fire' | 'wealth')[] = ['none', 'crime', 'fire', 'wealth'];
+    const labels: Record<string, string> = { none: '—', crime: 'Прест.', fire: 'Пожар', wealth: 'Богат.' };
+    for (const o of ovs) {
+      const b = document.createElement('button');
+      b.className = 'btn ov';
+      b.dataset.ov = o;
+      b.textContent = labels[o];
+      b.dataset.tip = `<b>${OVERLAY_NAMES[o]}</b><br>Оверлей карты (O — переключить по кругу)`;
+      b.addEventListener('click', () => {
+        game.renderer.showOverlay = o;
+      });
+      bar.appendChild(b);
+      this.ovBtns.push(b);
+    }
+    this.el.appendChild(bar);
     this.el.appendChild(this.canvas);
     root.appendChild(this.el);
     this.canvas.addEventListener('mousedown', (e) => {
@@ -67,6 +87,8 @@ export class Minimap {
 
   update(): void {
     const sim = this.game.sim;
+    const cur = this.game.renderer.showOverlay;
+    for (const b of this.ovBtns) b.classList.toggle('active', b.dataset.ov === cur);
     const v = sim.tileVersion * 1000 + sim.buildingVersion + sim.season * 7;
     if (v !== this.version) {
       this.version = v;
@@ -81,6 +103,20 @@ export class Minimap {
     for (const f of sim.fires) {
       const b = sim.world.buildings[f.building];
       if (b) g.fillRect(b.x * this.scale - 1, b.y * this.scale - 1, 3, 3);
+    }
+    // избранные и выбранный
+    g.fillStyle = '#ffe070';
+    for (const id of sim.favorites) {
+      const c = sim.citizens[id];
+      if (c && c.alive) g.fillRect(c.x * this.scale - 1, c.y * this.scale - 1, 3, 3);
+    }
+    const selId = this.game.renderer.selectedCitizen;
+    const sel = selId >= 0 ? sim.citizens[selId] : null;
+    if (sel && sel.alive) {
+      g.strokeStyle = '#ffe070';
+      g.beginPath();
+      g.arc(sel.x * this.scale, sel.y * this.scale, 4, 0, Math.PI * 2);
+      g.stroke();
     }
     // камера
     const cam = this.game.renderer.camera;

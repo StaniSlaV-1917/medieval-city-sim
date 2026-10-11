@@ -8,12 +8,15 @@ export class Input {
   private lastY = 0;
   mouseX = 0;
   mouseY = 0;
+  /** Курсор над элементом интерфейса (не над картой) */
+  overUi = true;
   private game: Game;
 
   constructor(game: Game, canvas: HTMLCanvasElement) {
     this.game = game;
     window.addEventListener('keydown', (e) => {
-      if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
       this.keys.add(e.code);
       this.onKey(e);
     });
@@ -30,6 +33,8 @@ export class Input {
     window.addEventListener('mousemove', (e) => {
       this.mouseX = e.clientX;
       this.mouseY = e.clientY;
+      const t = e.target as HTMLElement | null;
+      this.overUi = !!t && t !== canvas;
       if (this.dragging) {
         const dx = e.clientX - this.lastX;
         const dy = e.clientY - this.lastY;
@@ -85,7 +90,26 @@ export class Input {
         g.toggleFollow();
         break;
       case 'Escape':
-        g.deselect();
+        g.escape();
+        break;
+      case 'Tab':
+        e.preventDefault();
+        g.toggleClean();
+        break;
+      case 'KeyE':
+        g.openWindow('edicts');
+        break;
+      case 'KeyR':
+        g.openWindow('development');
+        break;
+      case 'KeyY':
+        g.openWindow('trade');
+        break;
+      case 'KeyN':
+        g.openWindow('region');
+        break;
+      case 'KeyL':
+        g.openWindow('chronicle');
         break;
       case 'Equal':
       case 'NumpadAdd':
@@ -96,13 +120,13 @@ export class Input {
         g.renderer.camera.zoomAt(0.8, window.innerWidth / 2, window.innerHeight / 2);
         break;
       case 'KeyM':
-        g.showPanel('market');
+        g.openWindow('economy');
         break;
       case 'KeyG':
-        g.showPanel('god');
+        g.openWindow('god');
         break;
       case 'KeyT':
-        g.showPanel('stats');
+        g.openWindow('stats');
         break;
       case 'KeyO':
         g.cycleOverlay();

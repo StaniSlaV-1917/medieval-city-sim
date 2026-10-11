@@ -1,6 +1,5 @@
 import { Simulation } from './sim/game';
 import { Renderer } from './render/renderer';
-import { Hud } from './ui/hud';
 import { Input } from './ui/input';
 import { showStartScreen } from './ui/startScreen';
 import { TICKS_PER_SECOND } from './core/time';
@@ -15,11 +14,26 @@ import { Minimap } from './ui/minimap';
 import { serialize, deserialize, saveToDb, loadFromDb, downloadJson, pickJsonFile } from './save/save';
 import { OVERLAY_NAMES } from './render/overlays';
 import type { OrderDef } from './ai/orders';
+import { WindowManager, Win } from './ui/windows';
+import { TooltipSystem } from './ui/tooltip';
+import { TopBar } from './ui/topbar';
+import { LeftBar } from './ui/leftbar';
+import { Outliner } from './ui/outliner';
+import { BuildBar } from './ui/buildbar';
+import { Toasts } from './ui/toasts';
+import { loadSettings, saveSettings, UiSettings } from './ui/settings';
+import { EdictsPanel, DevelopmentPanel, TradePanel, RegionPanel, SettingsPanel } from './ui/panels';
+import { ChronicleEvent, EventKind } from './events/chronicle';
+
+/** Панель, живущая внутри окна */
+interface Panelled {
+  toggle(force?: boolean): void;
+  update(): void;
+}
 
 export class Game {
   sim: Simulation;
   renderer: Renderer;
-  hud: Hud;
   input: Input;
   side: SidePanel;
   chronicleView: ChronicleView;
@@ -27,12 +41,22 @@ export class Game {
   godPanel: GodPanel;
   statsPanel: StatsPanel;
   minimap: Minimap;
+  windows: WindowManager;
+  tooltip: TooltipSystem;
+  topbar: TopBar;
+  leftbar: LeftBar;
+  outliner: Outliner;
+  buildbar: BuildBar;
+  toasts: Toasts;
+  settings: UiSettings;
+  private panels = new Map<string, Panelled>();
   private lastAutosave = 0;
   private lastAutosaveDay = -1;
   autosaveStatus = '';
   godTargeting: string | null = null;
   speed = 1;
   paused = false;
+  clean = false;
   /** Режим выбора цели для приказа */
   targeting: { order: OrderDef; citizen: number } | null = null;
   private acc = 0;
@@ -41,30 +65,88 @@ export class Game {
   private fpsAcc = 0;
   private fpsCount = 0;
   private running = true;
+  private ui: HTMLElement;
 
   constructor(seed: string, size: CitySize, loaded?: Simulation) {
     const canvas = document.getElementById('game') as HTMLCanvasElement;
     const ui = document.getElementById('ui') as HTMLElement;
+    this.ui = ui;
     this.sim = loaded ?? new Simulation({ seedText: seed, size });
+    this.settings = loadSettings();
     this.renderer = new Renderer(canvas, this.sim);
-    this.hud = new Hud(ui, this);
-    this.side = new SidePanel(ui, this);
+    this.windows = new WindowManager(ui);
+    // Постоянные элементы
+    this.topbar = new TopBar(ui, this);
+    this.leftbar = new LeftBar(ui, this);
     this.chronicleView = new ChronicleView(ui, this);
-    this.marketPanel = new MarketPanel(ui, this);
-    this.godPanel = new GodPanel(ui, this);
-    this.statsPanel = new StatsPanel(ui, this);
     this.minimap = new Minimap(ui, this);
+    this.buildbar = new BuildBar(ui, this);
+    this.toasts = new Toasts(ui, this);
+    // Окна
+    const mk = (id: string, title: string, width: number, anchor: 'left' | 'right' | 'center', extra: Partial<ConstructorParameters<typeof Win>[1]> = {}): Win => new Win(this.windows, { id, title, width, anchor, maxHeight: 520, ...extra });
+    this.marketPanel = new MarketPanel(mk('economy', 'Хозяйство', 380, 'left'), this);
+    this.panels.set('economy', this.marketPanel);
+    this.panels.set('edicts', new EdictsPanel(mk('edicts', 'Указы', 360, 'left'), this));
+    this.panels.set('development', new DevelopmentPanel(mk('development', 'Развитие', 380, 'left'), this));
+    this.panels.set('trade', new TradePanel(mk('trade', 'Торговля', 380, 'left'), this));
+    this.panels.set('region', new RegionPanel(mk('region', 'Регион', 340, 'left'), this));
+    this.statsPanel = new StatsPanel(mk('stats', 'Летопись чисел', 450, 'left'), this);
+    this.panels.set('stats', this.statsPanel);
+    this.godPanel = new GodPanel(mk('god', 'Длань небес', 360, 'left'), this);
+    this.panels.set('god', this.godPanel);
+    this.panels.set('settings', new SettingsPanel(mk('settings', 'Настройки', 400, 'center'), this));
+    this.outliner = new Outliner(mk('outliner', 'Обзор', 260, 'right', { maxHeight: 360 }), this);
+    this.panels.set('outliner', this.outliner);
+    this.side = new SidePanel(mk('card', 'Житель', 360, 'right', { maxHeight: 560, onClose: () => this.onCardClosed() }), this);
+    // Подсказки — поверх всего
+    this.tooltip = new TooltipSystem(ui);
     this.input = new Input(this, canvas);
+    this.applyScale();
     this.resize();
     window.addEventListener('resize', () => this.resize());
     const cam = this.renderer.camera;
     cam.setImmediate(this.sim.world.poi.cx * TILE, this.sim.world.poi.cy * TILE, 2);
+    this.sim.chronicle.listeners.push((e) => this.onEvent(e));
+    this.outliner.win.show();
     this.lastTime = performance.now();
     requestAnimationFrame((t) => this.frame(t));
   }
 
   resize(): void {
     this.renderer.resize(window.innerWidth, window.innerHeight);
+  }
+
+  applyScale(): void {
+    const s = this.settings.scale;
+    this.windows.setScale(s);
+    this.tooltip.scale = s;
+  }
+
+  /** Классификация события хроники для паузы и уведомлений */
+  private eventClass(e: ChronicleEvent): string | null {
+    const t = e.text.toLowerCase();
+    if (e.kind === EventKind.Disaster) {
+      if (/пожар|загорел|горит|огонь|молния/.test(t)) return 'fire';
+      if (/бунт|протест|толпа/.test(t)) return 'riot';
+      return 'disaster';
+    }
+    if (e.kind === EventKind.Death) return 'death';
+    if (e.kind === EventKind.Birth) return 'birth';
+    if (e.kind === EventKind.Crime) return /взлом|ограбил|драк|подж|убил|разбойник/.test(t) ? 'crime' : null;
+    if (e.kind === EventKind.Social || e.kind === EventKind.Faith) return /свадьб|венча|женил|вышла замуж/.test(t) ? 'wedding' : null;
+    if (e.kind === EventKind.Economy) return /караван/.test(t) ? 'caravan' : null;
+    return null;
+  }
+
+  private onEvent(e: ChronicleEvent): void {
+    const cls = this.eventClass(e);
+    const actor = e.actors[0];
+    if (cls && this.settings.pauseOn[cls] && !this.paused) {
+      this.paused = true;
+      this.toasts.show(`<b>Пауза:</b> ${e.text}`, e.kind, e.x, e.y, actor);
+      return;
+    }
+    if (this.settings.toasts && (e.importance >= 0.6 || (cls && cls !== 'death' && cls !== 'birth'))) this.toasts.show(e.text, e.kind, e.x, e.y, actor);
   }
 
   setSpeed(sp: number): void {
@@ -118,6 +200,23 @@ export class Game {
     this.side.showBuilding(id);
   }
 
+  toggleFavorite(id: number): void {
+    const f = this.sim.favorites;
+    const i = f.indexOf(id);
+    if (i >= 0) f.splice(i, 1);
+    else f.push(id);
+    this.outliner.render();
+  }
+
+  /** Карточку закрыли крестиком или Esc */
+  private onCardClosed(): void {
+    this.renderer.selectedCitizen = -1;
+    this.renderer.selectedBuilding = -1;
+    this.renderer.camera.follow = null;
+    this.targeting = null;
+    this.side.hide();
+  }
+
   deselect(): void {
     if (this.godTargeting) {
       this.godTargeting = null;
@@ -132,6 +231,21 @@ export class Game {
     this.renderer.selectedBuilding = -1;
     this.renderer.camera.follow = null;
     this.side.hide();
+  }
+
+  /** Esc: сначала отмена прицеливания, потом верхнее окно, потом снятие выбора */
+  escape(): void {
+    if (this.godTargeting || this.targeting) {
+      this.deselect();
+      return;
+    }
+    if (this.windows.closeTop()) return;
+    this.deselect();
+  }
+
+  toggleClean(): void {
+    this.clean = !this.clean;
+    this.ui.classList.toggle('clean', this.clean);
   }
 
   onClick(sx: number, sy: number): void {
@@ -215,14 +329,15 @@ export class Game {
     cam.update(dt);
     this.renderer.canvas.style.cursor = this.targeting || this.godTargeting ? 'crosshair' : 'default';
     this.renderer.render(dt);
-    this.hud.update(this.fps);
+    this.topbar.setStatus(`${this.fps.toFixed(0)} FPS · объектов ${this.renderer.debug.drawn}${this.renderer.showOverlay !== 'none' ? ` · ${OVERLAY_NAMES[this.renderer.showOverlay]}` : ''}${this.paused ? ' · ПАУЗА' : ''}`);
+    this.topbar.update();
+    this.leftbar.update(this);
     this.updateHover();
     this.side.update();
     this.chronicleView.update();
-    this.marketPanel.update();
-    this.godPanel.update();
-    this.statsPanel.update();
+    for (const p of this.panels.values()) p.update();
     this.minimap.update();
+    this.buildbar.update();
     this.autosave(now);
     requestAnimationFrame((t) => this.frame(t));
   }
@@ -270,18 +385,26 @@ export class Game {
 
   replaceSim(sim: Simulation): void {
     this.running = false;
+    saveSettings(this.settings);
     const ui = document.getElementById('ui') as HTMLElement;
     ui.innerHTML = '';
+    ui.classList.remove('clean');
     (window as unknown as { game: Game }).game = new Game(sim.seedText, sim.size, sim);
   }
 
-  /** Открыть одну из левых панелей, закрыв остальные */
-  showPanel(which: 'market' | 'god' | 'stats'): void {
-    const panels = { market: this.marketPanel, god: this.godPanel, stats: this.statsPanel };
-    for (const [k, p] of Object.entries(panels)) {
-      if (k === which) p.toggle();
-      else p.toggle(false);
+  /** Открыть/закрыть окно по id (левая панель, клавиши) */
+  openWindow(id: string): void {
+    if (id === 'chronicle') {
+      this.chronicleView.toggle();
+      return;
     }
+    const p = this.panels.get(id);
+    if (p) p.toggle();
+  }
+
+  /** Совместимость со старыми вызовами */
+  showPanel(which: 'market' | 'god' | 'stats'): void {
+    this.openWindow(which === 'market' ? 'economy' : which);
   }
 
   cycleOverlay(): void {
@@ -293,19 +416,24 @@ export class Game {
   private updateHover(): void {
     const sx = this.input.mouseX;
     const sy = this.input.mouseY;
+    if (this.input.overUi || this.tooltip.uiActive) {
+      this.renderer.hoverCitizen = -1;
+      this.tooltip.hideMap();
+      return;
+    }
     const cid = this.renderer.pickCitizen(sx, sy);
     this.renderer.hoverCitizen = cid;
     if (cid >= 0) {
       const c = this.sim.citizens[cid];
-      this.hud.showTooltip(sx, sy, this.side.citizenTooltip(c));
+      this.tooltip.showAt(sx, sy, this.side.citizenTooltip(c));
       return;
     }
     const bid = this.renderer.pickBuilding(sx, sy);
     if (bid >= 0) {
-      this.hud.showTooltip(sx, sy, this.side.buildingTooltip(this.sim.world.buildings[bid]));
+      this.tooltip.showAt(sx, sy, this.side.buildingTooltip(this.sim.world.buildings[bid]));
       return;
     }
-    this.hud.hideTooltip();
+    this.tooltip.hideMap();
   }
 }
 

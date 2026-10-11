@@ -101,6 +101,8 @@ export class Simulation {
   dragon: { x: number; y: number; dir: number; until: number; nextFire: number } | null = null;
   shake = 0;
   guardTarget = -1;
+  /** Избранные жители (★ в карточке и Обзоре) */
+  favorites: number[] = [];
   igniteBuilding: ((id: number, cause: string, intensity?: number) => boolean) | null = null;
   onBuildingDestroyed: ((b: Building, cause: string) => void) | null = null;
   /** Счётчики для инвариантов */

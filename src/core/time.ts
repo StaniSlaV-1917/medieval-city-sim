@@ -7,6 +7,8 @@ export const DAYS_PER_SEASON = 8;
 export const SEASONS_PER_YEAR = 4;
 export const DAYS_PER_YEAR = DAYS_PER_SEASON * SEASONS_PER_YEAR;
 export const TICKS_PER_YEAR = TICKS_PER_DAY * DAYS_PER_YEAR;
+/** Год основания города (летоисчисление в интерфейсе и биографиях) */
+export const CITY_FOUNDED_YEAR = 1247;
 
 export const enum Season {
   Spring = 0,

@@ -199,6 +199,7 @@ const sleep: ActionDef = {
       enterBuilding(ctx, b);
       if (c.needs.hunger < 60 && (b.storage['bread'] ?? 0) > 0) {
         b.storage['bread']--;
+        sim.market.flow('bread', 'съедено дома', -1);
         c.needs.hunger = Math.min(100, c.needs.hunger + 45);
       }
     }
@@ -329,6 +330,7 @@ const work: ActionDef = {
         for (const [g, val] of [['bread', 55], ['meat', 45], ['grain', 35]] as [Good, number][]) {
           if ((b.storage[g] ?? 0) >= 1 && (g !== 'grain' || b.type === BuildingType.Farm || b.type === BuildingType.Mill)) {
             b.storage[g] = (b.storage[g] ?? 0) - 1;
+            sim.market.flow(g, 'съедено работниками', -1);
             c.needs.hunger = Math.min(100, c.needs.hunger + val);
             break;
           }
@@ -397,7 +399,9 @@ export function produce(sim: Simulation, b: Building, c: Citizen, ticks: number)
   const hours = ticks / TICKS_PER_HOUR;
   // лесорубы в лесу валят брёвна, а не пилят доски
   if (b.type === BuildingType.Sawmill && c.actionData.outdoor) {
-    addStock(b, 'wood', 1.2 * hours * (hasTrait(c, Trait.Hardworking) ? 1.2 : 1));
+    const cut = 1.2 * hours * (hasTrait(c, Trait.Hardworking) ? 1.2 : 1);
+    addStock(b, 'wood', cut);
+    sim.market.flow('wood', 'лесорубы', cut);
     return;
   }
   // пропускная способность здания ограничена: лишние руки дают мало
@@ -423,9 +427,12 @@ export function produce(sim: Simulation, b: Building, c: Citizen, ticks: number)
     if (sim.rng.chance(0.02)) think(c, pickText(sim.rng, ['Сырья нет — сидим без дела.', 'Хоть бы подвезли, а то стоим.', 'Без припасов работа стоит.']));
     return;
   }
+  const bname = BUILDING_DEFS[b.type].name;
   for (const [g, rate] of Object.entries(r.inputs) as [Good, number][]) {
     if (!rate) continue;
+    const use = Math.min(b.storage[g] ?? 0, rate * hours * eff * ratio);
     b.storage[g] = Math.max(0, (b.storage[g] ?? 0) - rate * hours * eff * ratio);
+    sim.market.flow(g, bname, -use);
   }
 
   const season = b.type === BuildingType.Farm ? sim.market.harvest(sim) : 1;
@@ -433,6 +440,7 @@ export function produce(sim: Simulation, b: Building, c: Citizen, ticks: number)
     if (!rate) continue;
     const mul = b.type === BuildingType.Farm && g === 'grain' ? season : 1;
     addStock(b, g, rate * hours * eff * ratio * mul);
+    sim.market.flow(g, bname, rate * hours * eff * ratio * mul);
   }
 }
 
@@ -560,11 +568,14 @@ const eatHome: ActionDef = {
     if (!home) return actFor(ctx, 10);
     enterBuilding(ctx, home);
     if ((c.inventory['bread'] ?? 0) > 0) c.inventory['bread']--;
-    else if ((home.storage['bread'] ?? 0) > 0) home.storage['bread']--;
-    else return actFor(ctx, 10);
+    else if ((home.storage['bread'] ?? 0) > 0) {
+      home.storage['bread']--;
+      sim.market.flow('bread', 'съедено дома', -1);
+    } else return actFor(ctx, 10);
     c.needs.hunger = Math.min(100, c.needs.hunger + (isChild(c) ? 70 : 55));
     if (c.needs.hunger < 90 && (home.storage['meat'] ?? 0) >= 1 && ctx.rng.chance(0.5)) {
       home.storage['meat']--;
+      sim.market.flow('meat', 'съедено дома', -1);
       c.needs.hunger = Math.min(100, c.needs.hunger + 35);
       c.needs.health = Math.min(100, c.needs.health + 1);
     }
@@ -991,6 +1002,7 @@ const homeRest: ActionDef = {
       const home = sim.world.buildings[c.inside];
       if (home && (home.storage['bread'] ?? 0) > 0) {
         home.storage['bread']--;
+        sim.market.flow('bread', 'съедено дома', -1);
         c.needs.hunger = Math.min(100, c.needs.hunger + 50);
       }
     }

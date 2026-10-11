@@ -8,16 +8,33 @@ export class ChronicleView {
   private game: Game;
   private shown = 0;
   private filter = 'all';
+  private ticker: HTMLElement;
+  collapsed = false;
 
   constructor(root: HTMLElement, game: Game) {
     this.game = game;
     this.el = document.createElement('div');
     this.el.id = 'chron';
     this.el.className = 'panel';
-    this.el.innerHTML = `<h3>Хроника города</h3><div class="filters"><button class="btn active" data-f="all">Все</button><button class="btn" data-f="2">Преступления</button><button class="btn" data-f="1">Люди</button><button class="btn" data-f="3">Бедствия</button><button class="btn" data-f="4">Торговля</button></div><div class="list"></div>`;
+    this.el.dataset.fixed = '1';
+    this.el.innerHTML = `<div class="ch-head"><h3>Хроника города</h3><button class="wb collapse" data-tip="Свернуть в одну строку">▾</button></div><div class="ticker"></div><div class="filters"><button class="btn active" data-f="all">Все</button><button class="btn" data-f="2">Преступления</button><button class="btn" data-f="1">Люди</button><button class="btn" data-f="3">Бедствия</button><button class="btn" data-f="4">Торговля</button></div><div class="list"></div>`;
     root.appendChild(this.el);
     this.list = this.el.querySelector('.list')!;
+    this.ticker = this.el.querySelector('.ticker')!;
+    try {
+      this.setCollapsed(localStorage.getItem('waldmark.ui.chron') === '1');
+    } catch {
+      /* ignore */
+    }
     this.el.addEventListener('click', (e) => {
+      if ((e.target as HTMLElement).closest('.collapse')) {
+        this.setCollapsed(!this.collapsed);
+        return;
+      }
+      if ((e.target as HTMLElement).closest('.ticker')) {
+        this.setCollapsed(false);
+        return;
+      }
       const fb = (e.target as HTMLElement).closest('[data-f]') as HTMLElement | null;
       if (fb) {
         this.filter = fb.getAttribute('data-f')!;
@@ -37,9 +54,27 @@ export class ChronicleView {
     });
   }
 
+  setCollapsed(v: boolean): void {
+    this.collapsed = v;
+    this.el.classList.toggle('collapsed', v);
+    (this.el.querySelector('.collapse') as HTMLElement).textContent = v ? '▴' : '▾';
+    try {
+      localStorage.setItem('waldmark.ui.chron', v ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+    if (!v) this.list.scrollTop = this.list.scrollHeight;
+  }
+
+  toggle(): void {
+    this.setCollapsed(!this.collapsed);
+  }
+
   update(): void {
     const events = this.game.sim.chronicle.events;
     if (events.length === this.shown) return;
+    const last = events[events.length - 1];
+    if (last) this.ticker.innerHTML = `<span class="t">${formatClock(last.tick)}</span><span class="k${last.kind}">${last.text}</span>`;
     // добавить новые
     const start = Math.max(0, this.shown, events.length - 80);
     for (let i = start; i < events.length; i++) {

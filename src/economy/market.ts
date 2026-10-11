@@ -21,6 +21,18 @@ export class Market {
   soldYesterday: Record<Good, number>;
   /** Фактор урожая года (неурожай < 0.7) */
   yearFactor = 1;
+  /** Потоки за сегодня и вчера: товар → источник → единиц (+ приход, − расход) */
+  flowsToday: Partial<Record<Good, Record<string, number>>> = {};
+  flowsYesterday: Partial<Record<Good, Record<string, number>>> = {};
+  /** Запас на начало дня (для тренда) */
+  dayStartStock: Record<Good, number>;
+  private dayStartSet = false;
+
+  /** Восстановить дневной снимок из сохранения */
+  restoreDayStart(stock: Record<Good, number>): void {
+    Object.assign(this.dayStartStock, stock);
+    this.dayStartSet = true;
+  }
   private lastBreadWarn = -1;
 
   constructor() {
@@ -30,6 +42,14 @@ export class Market {
     this.demand = z();
     this.soldToday = z();
     this.soldYesterday = z();
+    this.dayStartStock = z();
+  }
+
+  /** Учёт движения товара (для полосы ресурсов) */
+  flow(good: Good, label: string, n: number): void {
+    if (!n) return;
+    const f = this.flowsToday[good] ?? (this.flowsToday[good] = {});
+    f[label] = (f[label] ?? 0) + n;
   }
 
   price(good: Good): number {
@@ -51,6 +71,10 @@ export class Market {
         const v = b.storage[g];
         if (v) stock[g] += v;
       }
+    }
+    if (!this.dayStartSet) {
+      this.dayStartSet = true;
+      this.dayStartStock = { ...stock };
     }
     // Оценка дневной потребности
     const pop = sim.stats.population || sim.citizens.length;
@@ -89,6 +113,10 @@ export class Market {
   newDay(sim: Simulation): void {
     this.soldYesterday = { ...this.soldToday };
     for (const g of GOODS) this.soldToday[g] = 0;
+    this.flowsYesterday = this.flowsToday;
+    this.flowsToday = {};
+    this.dayStartStock = { ...this.stock };
+    this.dayStartSet = true;
     // фактор урожая на год определяется в начале весны
     const t = sim.time;
     if (t.season === 0 && t.dayOfSeason === 1) {
@@ -124,6 +152,7 @@ export class Market {
     }
     b.storage[good] = (b.storage[good] ?? 0) - q;
     this.soldToday[good] += q;
+    this.flow(good, 'куплено горожанами', -q);
     b.storage['revenue'] = (b.storage['revenue'] ?? 0) + cost;
     return q;
   }

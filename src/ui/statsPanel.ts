@@ -1,5 +1,6 @@
 import type { Game } from '../main';
 import { plural } from '../core/math';
+import type { Win } from './windows';
 
 const SERIES: { key: 'population' | 'treasury' | 'bread' | 'avgHunger' | 'avgMood' | 'crimes' | 'health' | 'unrest'; label: string; color: string; scale?: number }[] = [
   { key: 'population', label: 'Население', color: '#2a4a9a' },
@@ -15,33 +16,27 @@ const SERIES: { key: 'population' | 'treasury' | 'bread' | 'avgHunger' | 'avgMoo
 export class StatsPanel {
   el: HTMLElement;
   private game: Game;
-  private visible = false;
   private canvas: HTMLCanvasElement;
   private last = 0;
+  win: Win;
 
-  constructor(root: HTMLElement, game: Game) {
+  constructor(win: Win, game: Game) {
     this.game = game;
-    this.el = document.createElement('div');
-    this.el.id = 'stats';
-    this.el.className = 'panel';
-    this.el.style.display = 'none';
-    this.el.innerHTML = `<button class="close" title="Закрыть (T)">✕</button><h2>Летопись чисел</h2><div class="summary"></div><canvas width="420" height="300"></canvas><div class="legend"></div>`;
-    root.appendChild(this.el);
+    this.win = win;
+    this.el = win.body;
+    this.el.classList.add('stats');
+    this.el.innerHTML = `<div class="summary"></div><canvas width="420" height="300"></canvas><div class="legend"></div>`;
     this.canvas = this.el.querySelector('canvas')!;
     this.el.querySelector('.legend')!.innerHTML = SERIES.map((s) => `<span><i style="background:${s.color}"></i>${s.label}</span>`).join('');
-    this.el.addEventListener('click', (e) => {
-      if ((e.target as HTMLElement).classList.contains('close')) this.toggle(false);
-    });
   }
 
   toggle(force?: boolean): void {
-    this.visible = force ?? !this.visible;
-    this.el.style.display = this.visible ? 'block' : 'none';
-    if (this.visible) this.render();
+    this.win.toggle(force);
+    if (this.win.open) this.render();
   }
 
   update(): void {
-    if (!this.visible) return;
+    if (!this.win.open) return;
     const now = performance.now();
     if (now - this.last < 2000) return;
     this.last = now;

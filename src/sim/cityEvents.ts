@@ -609,6 +609,7 @@ function caravanTrade(sim: Simulation, leader: Citizen): void {
       else sim.treasury -= cost;
       leader.money += cost;
       wh.storage[g] = (wh.storage[g] ?? 0) + q;
+      sim.market.flow(g, 'караван привёз', q);
       sold += cost;
     }
     // купить излишки склада
@@ -623,6 +624,7 @@ function caravanTrade(sim: Simulation, leader: Citizen): void {
       leader.money -= cost;
       owner.money += cost;
       wh.storage[g] = have - q;
+      sim.market.flow(g, 'караван скупил', -q);
       bought += cost;
     }
   }
