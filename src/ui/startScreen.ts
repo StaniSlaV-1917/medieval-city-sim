@@ -1,4 +1,5 @@
 import { CitySize, CITY_SIZES } from '../world/generator';
+import { StartScene } from './startScene';
 
 const RANDOM_WORDS = ['Вальдмарк', 'Хольцбург', 'Штайнфурт', 'Розенау', 'Айзенберг', 'Грюнвальд', 'Линденхоф', 'Зильберталь', 'Фалькенштайн', 'Кройцбург', 'Мондорф', 'Хиршфельд'];
 
@@ -6,6 +7,7 @@ export function showStartScreen(root: HTMLElement, onStart: (seed: string, size:
   const div = document.createElement('div');
   div.id = 'start';
   div.innerHTML = `
+    <div class="scene-wrap"></div>
     <div class="panel">
       <h1>Вальдмарк</h1>
       <p class="sub">живой средневековый город, за которым можно наблюдать часами</p>
@@ -31,6 +33,7 @@ export function showStartScreen(root: HTMLElement, onStart: (seed: string, size:
       </div>
     </div>`;
   root.appendChild(div);
+  const scene = new StartScene(div.querySelector('.scene-wrap')!);
   const seedInput = div.querySelector<HTMLInputElement>('#seed')!;
   const sizeSel = div.querySelector<HTMLSelectElement>('#size')!;
   const randomSeed = () => {
@@ -43,16 +46,21 @@ export function showStartScreen(root: HTMLElement, onStart: (seed: string, size:
     const seed = seedInput.value.trim() || 'Вальдмарк';
     const size = sizeSel.value as CitySize;
     const fog = div.querySelector<HTMLInputElement>('#fog')!.checked;
+    scene.stop();
     div.remove();
     onStart(seed, size, fog);
   };
   div.querySelector('#go')!.addEventListener('click', go);
   div.querySelector('#cont')?.addEventListener('click', () => {
+    scene.stop();
     div.remove();
     saved!.load();
   });
   div.querySelector('#imp')!.addEventListener('click', async () => {
-    if (onImport && (await onImport())) div.remove();
+    if (onImport && (await onImport())) {
+      scene.stop();
+      div.remove();
+    }
   });
   seedInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') go();
