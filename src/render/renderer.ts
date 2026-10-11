@@ -78,9 +78,10 @@ export class Renderer {
     this.lightCanvas = makeCanvas(canvas.width, canvas.height);
     this.lg = ctx2d(this.lightCanvas);
     // Отдельный холст для облачков: чёткий текст при любом DPR
-    this.bubbleCanvas = document.createElement('canvas');
+    const existing = document.getElementById('bubbles') as HTMLCanvasElement | null;
+    this.bubbleCanvas = existing ?? document.createElement('canvas');
     this.bubbleCanvas.id = 'bubbles';
-    canvas.parentElement?.insertBefore(this.bubbleCanvas, canvas.nextSibling);
+    if (!existing) canvas.parentElement?.insertBefore(this.bubbleCanvas, canvas.nextSibling);
     this.bg = ctx2d(this.bubbleCanvas);
   }
 
