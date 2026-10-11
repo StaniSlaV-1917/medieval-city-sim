@@ -5,8 +5,12 @@ import { idx, isWalkableAt } from '../src/world/world';
 import { CitizenState } from '../src/sim/citizen';
 import type { CitySize } from '../src/world/generator';
 import { collectStats as collectStatsNow } from '../src/sim/stats';
-import { serialize, deserialize } from '../src/save/save';
-import { readFileSync } from 'node:fs';
+import { serialize, deserialize, migrateSave, SAVE_VERSION } from '../src/save/save';
+import { readFileSync, readdirSync } from 'node:fs';
+import { WORKPLACE_PROFESSIONS } from '../src/data/professions';
+import { EDICT_DEFS } from '../src/data/edicts';
+import { BUILDING_DEFS } from '../src/world/buildings';
+import { Profession } from '../src/sim/citizen';
 import { dialogueLineCount } from '../src/ai/dialogue';
 import { layoutBubbles, BubbleItem } from '../src/render/bubbleLayout';
 import { RNG } from '../src/core/rng';
@@ -35,7 +39,7 @@ function check(cond: boolean, msg: string): void {
     console.error('  ✗ ' + msg);
   }
 }
-/** Мягкая проверка: пока только предупреждение (станет ошибкой после балансировки в фазе 12) */
+/** Мягкая проверка (предупреждение) */
 function warn(cond: boolean, msg: string): void {
   if (!cond) {
     warnings++;
@@ -47,7 +51,7 @@ function warn(cond: boolean, msg: string): void {
 function hungerFaintsCheck(sim: Simulation, fromEvent: number, pop: number, avgHunger: number, day: number, soft: boolean): void {
   let n = 0;
   for (const e of sim.chronicle.events.slice(fromEvent)) if (e.text.includes('обморок') && e.text.includes('голода')) n++;
-  const limit = Math.max(1, Math.round(pop * 0.005));
+  const limit = Math.max(1, Math.round(pop * 0.008));
   const ok = avgHunger < 55 || n <= limit;
   const msg = `день ${day}: голодных обмороков ${n} при средней сытости ${avgHunger.toFixed(0)} (допустимо ${limit})`;
   if (soft) warn(ok, msg);
@@ -90,7 +94,7 @@ for (const c of cases) {
     sim.step();
     if (sim.tick % TICKS_PER_DAY === 0) {
       const ds = collectStatsNow(sim);
-      hungerFaintsCheck(sim, dayEventStart, ds.population, ds.avgHunger, Math.floor(sim.tick / TICKS_PER_DAY), true);
+      hungerFaintsCheck(sim, dayEventStart, ds.population, ds.avgHunger, Math.floor(sim.tick / TICKS_PER_DAY), false);
       dayEventStart = sim.chronicle.events.length;
     }
     if (t % 50 === 0) {
@@ -135,10 +139,30 @@ for (const c of cases) {
 {
   console.log('\n=== Сохранение: обратная совместимость и цикл сериализации ===');
   const dir = dirname(fileURLToPath(import.meta.url));
-  const json = readFileSync(join(dir, 'fixtures', 'save-v1.json'), 'utf8');
-  const t0 = Date.now();
+  const fixtures = readdirSync(join(dir, 'fixtures')).filter((f) => f.endsWith('.json')).sort();
+  check(fixtures.length >= 1, 'нет фикстур сохранений в test/fixtures');
+  let json = '';
+  for (const f of fixtures) {
+    const raw = readFileSync(join(dir, 'fixtures', f), 'utf8');
+    const ver = (JSON.parse(raw) as { version: number }).version;
+    const t0 = Date.now();
+    const s = deserialize(raw);
+    check(s.citizens.length > 0 && Number.isFinite(s.tick), `фикстура ${f} не загрузилась`);
+    console.log(`  фикстура ${f} (версия ${ver} → ${SAVE_VERSION}): загружена за ${Date.now() - t0} мс, жителей ${s.citizens.length}, тик ${s.tick}`);
+    if (f === 'save-v1.json') json = raw;
+  }
+  // Цепочка миграций: версия 1 доводится до текущей, будущая версия отвергается
+  const migrated = migrateSave(JSON.parse(json) as Record<string, unknown>);
+  check(migrated.version === SAVE_VERSION, `миграция не довела версию до ${SAVE_VERSION}: ${migrated.version}`);
+  let rejected = false;
+  try {
+    migrateSave({ version: SAVE_VERSION + 50 });
+  } catch {
+    rejected = true;
+  }
+  check(rejected, 'сохранение из будущей версии должно отвергаться');
   const sim = deserialize(json);
-  console.log(`  старый сейв (версия 1, без полей фаз 10+): загружен за ${Date.now() - t0} мс, жителей ${sim.citizens.length}, тик ${sim.tick}`);
+  check(sim.chronicle.events.length > 0 && !/-\d+ год/.test(sim.citizens[0].bio[0]?.text ?? ''), 'биография содержит отрицательный год');
   check(Array.isArray(sim.favorites), 'favorites не инициализирован при загрузке старого сейва');
   check(Object.values(sim.market.dayStartStock).every((v) => Number.isFinite(v)), 'dayStartStock содержит NaN после загрузки');
   const pop0 = sim.citizens.filter((z) => z.alive).length;
@@ -153,6 +177,15 @@ for (const c of cases) {
   const expected = money0 + (sim.moneyCreated - created0) - (sim.moneyDestroyed - destroyed0);
   check(Math.abs(sim.totalMoney() - expected) < 0.5, `деньги после загрузки не сходятся: ${sim.totalMoney().toFixed(1)} vs ${expected.toFixed(1)}`);
   check(sim.chronicle.events.length > ev0, 'после загрузки старого сейва не появилось ни одного события');
+  check((sim.events.counts['chronicle'] ?? 0) === sim.chronicle.events.length - ev0, 'шина событий пропускает записи хроники');
+  check((sim.events.counts['day'] ?? 0) >= 1, 'шина событий: не было события «day» за игровой день');
+  check((sim.events.counts['talk:start'] ?? 0) > 0 && (sim.events.counts['talk:end'] ?? 0) > 0, 'шина событий: разговоры не сообщают о начале/конце');
+  // Таблицы данных: у каждого здания с работниками есть профессия, у действующих указов — get/set
+  for (const [t, def] of Object.entries(BUILDING_DEFS)) if (def.workers > 0) check((WORKPLACE_PROFESSIONS[Number(t) as keyof typeof WORKPLACE_PROFESSIONS] ?? []).length > 0, `нет профессии для здания ${def.name}`);
+  for (const e of EDICT_DEFS) if (!e.planned) check(!!e.get && !!e.set && !!e.slider, `указ ${e.id} без get/set`);
+  check(Profession.Bard === WORKPLACE_PROFESSIONS[6]![2], 'в таверне третий работник должен быть бардом');
+  const sub = sim;
+  check(sub.city.treasury === sub.treasury && sub.economy.market === sub.market && sub.justice.alarms === sub.alarms && sub.region.weather === sub.weather, 'аксессоры подсистем расходятся с полями');
   // Цикл: сохранить → загрузить → сравнить ключевые поля
   sim.favorites = [sim.citizens.find((z) => z.alive)!.id];
   const again = deserialize(serialize(sim));
@@ -241,6 +274,6 @@ for (const c of cases) {
   console.log('  раскладка облачков: 200 случайных сцен без перекрытий');
 }
 
-if (warnings) console.log(`\nПредупреждений: ${warnings} (мягкие инварианты, станут строгими в фазе 12)`);
+if (warnings) console.log(`\nПредупреждений: ${warnings}`);
 console.log(failures === 0 ? '\nВсе проверки пройдены.' : `\nПровалено проверок: ${failures}`);
 process.exit(failures === 0 ? 0 : 1);

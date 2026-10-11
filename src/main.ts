@@ -111,7 +111,7 @@ export class Game {
     window.addEventListener('resize', () => this.resize());
     const cam = this.renderer.camera;
     cam.setImmediate(this.sim.world.poi.cx * TILE, this.sim.world.poi.cy * TILE, 2);
-    this.sim.chronicle.listeners.push((e) => this.onEvent(e));
+    this.sim.events.on('chronicle', (e) => this.onEvent(e));
     this.outliner.win.show();
     this.lastTime = performance.now();
     requestAnimationFrame((t) => this.frame(t));

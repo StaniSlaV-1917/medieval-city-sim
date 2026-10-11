@@ -7,27 +7,27 @@ import { SpatialHash } from '../world/spatial';
 import { Citizen } from './citizen';
 import { Chronicle, EventKind } from '../events/chronicle';
 import { TICKS_PER_HOUR, TICKS_PER_DAY, getTime, seasonOf, Season } from '../core/time';
-import { collectTaxes } from '../economy/taxes';
 import { createPopulation } from './population';
 import { stepCitizens } from './systems';
 import { Stats, collectStats } from './stats';
 import type { Talk } from '../ai/conversation';
-import { Market } from '../economy/market';
+import type { Market } from '../economy/market';
 import type { Alarm, CrimeRecord } from './crime';
-import type { ActionCtx } from '../ai/actions';
-import type { Order } from './citizen';
-import { dailyTrade } from '../economy/trade';
-import { Weather, createWeather, updateWeather } from './weather';
+import type { Weather } from './weather';
 import { Fire, igniteBuilding, updateFires } from './fire';
 import { updateHealth, updateFunerals } from './health';
 import { Building, BUILDING_DEFS } from '../world/buildings';
-import { Animal, createAnimals, updateAnimals } from './animals';
+import { Animal, createAnimals } from './animals';
 import { Festival, updateCityEvents } from './cityEvents';
-import { onBuildingDestroyed, updateConstruction, updateGrowth } from './construction';
+import { CityState, DayRecord } from './sub/cityState';
+import { Economy, Caravan } from './sub/economy';
+import { ConstructionSystem } from './sub/constructionSystem';
+import { Justice, Protest } from './sub/justice';
+import { Region, Raid } from './sub/region';
 import { scheduleOf, DaySchedule } from './schedule';
 import { professionName } from './citizen';
 import { updateGod } from './god';
-import type { Good } from '../economy/goods';
+import { EventBus, SimEvents } from '../core/events';
 
 export interface SimOptions {
   seedText: string;
@@ -48,70 +48,111 @@ export class Simulation {
   chronicle = new Chronicle();
   seedText: string;
   size: CitySize;
-  /** Казна */
-  treasury = 0;
-  taxRate = 0.1;
-  lastTax = 0;
-  lastCharity = 0;
-  stats: Stats;
+  /** Шина событий (интерфейс, статистика, будущие системы) */
+  events = new EventBus<SimEvents>();
+  // ---- Подсистемы (фаза 12). Старые имена полей ниже — делегирующие аксессоры для совместимости.
+  city = new CityState();
+  economy = new Economy();
+  construction = new ConstructionSystem();
+  justice = new Justice();
+  region = new Region();
   /** Текущие разговоры (ключ — id первого собеседника) */
   talks = new Map<number, Talk>();
-  market = new Market();
-  alarms: Alarm[] = [];
-  crimeLog: CrimeRecord[] = [];
-  fights: { a: number; b: number; until: number }[] = [];
-  /** Поджог по приказу (устанавливается в фазе 6) */
-  arsonOrderStart: ((ctx: ActionCtx, o: Order) => boolean) | null = null;
   /** Принудительный исход ближайшего разговора по приказу: 1 — дружба, 2 — ссора, 3 — флирт */
   forcedTalk: { a: number; mode: number } | null = null;
   /** Ожидающая свадьба (для церемонии) */
   pendingWedding: { a: number; b: number; tick: number } | null = null;
-  /** Дневные снимки для графиков */
-  history: { day: number; population: number; treasury: number; bread: number; avgHunger: number; avgMood: number; money: number; crimes: number; health: number; unrest: number }[] = [];
   /** Камера (центр в тайлах) — для LOD */
   focusX = 0;
   focusY = 0;
   /** Сезон для отслеживания смены */
   private lastSeason: Season;
-  weather: Weather = createWeather();
   fires: Fire[] = [];
   funerals: { dead: number; tick: number; mourners: number[]; phase: number }[] = [];
-  deaths = 0;
-  sickCount = 0;
-  /** Множители бедствий (божественные силы) */
-  fireRiskMul = 1;
-  epidemicMul = 1;
-  lightningFlash = 0;
-  animals: Animal[] = [];
   festival: Festival | null = null;
-  unrest = 10;
-  protest: { until: number; riot: boolean; members: number[]; x: number; y: number; responded?: boolean } | null = null;
-  caravan: { members: number[]; phase: number; goods: Partial<Record<Good, number>>; until: number; dest: { x: number; y: number } } | null = null;
-  raid: { members: number[]; phase: number; gate: { x: number; y: number }; until: number; loot: number } | null = null;
-  nextCaravanDay = 2;
-  nextRaidDay = 6;
-  heraldNews: string[] = [];
   timers: { at: number; fn: () => void }[] = [];
-  /** Версии для перерисовки (здания/тайлы) */
-  buildingVersion = 0;
-  tileVersion = 0;
-  /** Наводнение: затопленные тайлы */
-  flood: { tiles: number[]; until: number } | null = null;
-  /** Дракон */
-  dragon: { x: number; y: number; dir: number; until: number; nextFire: number } | null = null;
-  shake = 0;
-  guardTarget = -1;
-  /** Избранные жители (★ в карточке и Обзоре) */
-  favorites: number[] = [];
   igniteBuilding: ((id: number, cause: string, intensity?: number) => boolean) | null = null;
   onBuildingDestroyed: ((b: Building, cause: string) => void) | null = null;
-  /** Счётчики для инвариантов */
-  moneyCreated = 0; // деньги, созданные системой (внешняя торговля, караваны, бог)
-  moneyDestroyed = 0;
-  exportIncome = 0; // выручка от продажи сырья за город
-  importCost = 0; // расходы лавок на закупку сырья за городом
+
+  // ---- Город
+  get treasury(): number { return this.city.treasury; }
+  set treasury(v: number) { this.city.treasury = v; }
+  get taxRate(): number { return this.city.taxRate; }
+  set taxRate(v: number) { this.city.taxRate = v; }
+  get lastTax(): number { return this.city.lastTax; }
+  set lastTax(v: number) { this.city.lastTax = v; }
+  get lastCharity(): number { return this.city.lastCharity; }
+  set lastCharity(v: number) { this.city.lastCharity = v; }
+  get unrest(): number { return this.city.unrest; }
+  set unrest(v: number) { this.city.unrest = v; }
+  get guardTarget(): number { return this.city.guardTarget; }
+  set guardTarget(v: number) { this.city.guardTarget = v; }
+  get favorites(): number[] { return this.city.favorites; }
+  set favorites(v: number[]) { this.city.favorites = v; }
+  get history(): DayRecord[] { return this.city.history; }
+  set history(v: DayRecord[]) { this.city.history = v; }
+  get heraldNews(): string[] { return this.city.heraldNews; }
+  set heraldNews(v: string[]) { this.city.heraldNews = v; }
+  get deaths(): number { return this.city.deaths; }
+  set deaths(v: number) { this.city.deaths = v; }
+  get sickCount(): number { return this.city.sickCount; }
+  set sickCount(v: number) { this.city.sickCount = v; }
+  get famine(): boolean { return this.city.famine; }
+  set famine(v: boolean) { this.city.famine = v; }
+  get stats(): Stats { return this.city.stats; }
+  set stats(v: Stats) { this.city.stats = v; }
+  // ---- Экономика
+  get market(): Market { return this.economy.market; }
+  get moneyCreated(): number { return this.economy.moneyCreated; }
+  set moneyCreated(v: number) { this.economy.moneyCreated = v; }
+  get moneyDestroyed(): number { return this.economy.moneyDestroyed; }
+  set moneyDestroyed(v: number) { this.economy.moneyDestroyed = v; }
+  get exportIncome(): number { return this.economy.exportIncome; }
+  set exportIncome(v: number) { this.economy.exportIncome = v; }
+  get importCost(): number { return this.economy.importCost; }
+  set importCost(v: number) { this.economy.importCost = v; }
+  get caravan(): Caravan | null { return this.economy.caravan; }
+  set caravan(v: Caravan | null) { this.economy.caravan = v; }
+  get nextCaravanDay(): number { return this.economy.nextCaravanDay; }
+  set nextCaravanDay(v: number) { this.economy.nextCaravanDay = v; }
+  // ---- Строительство
+  get buildingVersion(): number { return this.construction.buildingVersion; }
+  set buildingVersion(v: number) { this.construction.buildingVersion = v; }
+  get tileVersion(): number { return this.construction.tileVersion; }
+  set tileVersion(v: number) { this.construction.tileVersion = v; }
+  // ---- Правопорядок
+  get alarms(): Alarm[] { return this.justice.alarms; }
+  set alarms(v: Alarm[]) { this.justice.alarms = v; }
+  get crimeLog(): CrimeRecord[] { return this.justice.crimeLog; }
+  set crimeLog(v: CrimeRecord[]) { this.justice.crimeLog = v; }
+  get fights(): { a: number; b: number; until: number }[] { return this.justice.fights; }
+  set fights(v: { a: number; b: number; until: number }[]) { this.justice.fights = v; }
+  get protest(): Protest | null { return this.justice.protest; }
+  set protest(v: Protest | null) { this.justice.protest = v; }
+  // ---- Регион
+  get weather(): Weather { return this.region.weather; }
+  set weather(v: Weather) { this.region.weather = v; }
+  get animals(): Animal[] { return this.region.animals; }
+  set animals(v: Animal[]) { this.region.animals = v; }
+  get raid(): Raid | null { return this.region.raid; }
+  set raid(v: Raid | null) { this.region.raid = v; }
+  get nextRaidDay(): number { return this.region.nextRaidDay; }
+  set nextRaidDay(v: number) { this.region.nextRaidDay = v; }
+  get flood(): { tiles: number[]; until: number } | null { return this.region.flood; }
+  set flood(v: { tiles: number[]; until: number } | null) { this.region.flood = v; }
+  get dragon(): { x: number; y: number; dir: number; until: number; nextFire: number } | null { return this.region.dragon; }
+  set dragon(v: { x: number; y: number; dir: number; until: number; nextFire: number } | null) { this.region.dragon = v; }
+  get fireRiskMul(): number { return this.region.fireRiskMul; }
+  set fireRiskMul(v: number) { this.region.fireRiskMul = v; }
+  get epidemicMul(): number { return this.region.epidemicMul; }
+  set epidemicMul(v: number) { this.region.epidemicMul = v; }
+  get lightningFlash(): number { return this.region.lightningFlash; }
+  set lightningFlash(v: number) { this.region.lightningFlash = v; }
+  get shake(): number { return this.region.shake; }
+  set shake(v: number) { this.region.shake = v; }
 
   constructor(opts: SimOptions) {
+    this.chronicle.listeners.push((e) => this.events.emit('chronicle', e));
     this.seedText = opts.seedText;
     this.size = opts.size;
     this.world = generateWorld(opts.seedText, opts.size);
@@ -123,7 +164,7 @@ export class Simulation {
     this.focusX = this.world.poi.cx;
     this.focusY = this.world.poi.cy;
     this.igniteBuilding = (id, cause, intensity) => igniteBuilding(this, id, cause, intensity);
-    this.onBuildingDestroyed = (b, cause) => onBuildingDestroyed(this, b, cause);
+    this.onBuildingDestroyed = (b, cause) => this.construction.destroyed(this, b, cause);
     if (!opts.skipPopulation) {
       createPopulation(this);
       createAnimals(this);
@@ -148,6 +189,7 @@ export class Simulation {
     if (season !== this.lastSeason) {
       this.lastSeason = season;
       this.onSeasonChange(season);
+      this.events.emit('season', { season });
     }
     // Пространственный хеш
     this.spatial.clear();
@@ -156,14 +198,13 @@ export class Simulation {
       this.spatial.insert(c.id, c.x, c.y);
     }
     stepCitizens(this);
-    updateWeather(this);
+    this.region.updateWeather(this);
     updateFires(this);
     updateHealth(this);
     updateFunerals(this);
     updateCityEvents(this);
-    updateAnimals(this);
-    updateConstruction(this);
-    updateGrowth(this);
+    this.region.updateAnimals(this);
+    this.construction.update(this);
     updateGod(this);
     if (this.timers.length) {
       const due = this.timers.filter((t) => t.at <= this.tick);
@@ -172,17 +213,9 @@ export class Simulation {
         for (const t of due) t.fn();
       }
     }
-    if (this.tick % TICKS_PER_HOUR === 0) this.market.update(this);
-    if (this.tick % TICKS_PER_DAY === 0) {
-      this.market.newDay(this);
-      this.stats = collectStats(this);
-      const dayStart = this.tick - TICKS_PER_DAY;
-      const crimes = this.crimeLog.filter((r) => r.tick >= dayStart).length;
-      this.history.push({ day: Math.floor(this.tick / TICKS_PER_DAY), population: this.stats.population, treasury: Math.round(this.treasury), bread: this.market.prices.bread, avgHunger: this.stats.avgHunger, avgMood: this.stats.avgMood, money: Math.round(this.totalMoney()), crimes, health: this.stats.avgHealth, unrest: this.unrest });
-      if (this.history.length > 400) this.history.shift();
-    }
-    if (this.tick % TICKS_PER_DAY === 6 * TICKS_PER_HOUR) collectTaxes(this);
-    if (this.tick % TICKS_PER_DAY === 20 * TICKS_PER_HOUR) dailyTrade(this);
+    if (this.tick % TICKS_PER_DAY === 0) this.events.emit('day', { day: Math.floor(this.tick / TICKS_PER_DAY) });
+    this.economy.update(this);
+    if (this.tick % TICKS_PER_DAY === 0) this.city.endOfDay(this);
     if (this.tick % 600 === 0) this.stats = collectStats(this);
   }
 

@@ -41,6 +41,7 @@ export const POWERS: PowerDef[] = [
 ];
 
 export function applyPower(sim: Simulation, id: string, tx: number, ty: number): string {
+  sim.events.emit('god:power', { id, x: tx, y: ty });
   const rng = sim.rng;
   const world = sim.world;
   const nearestB = () => {

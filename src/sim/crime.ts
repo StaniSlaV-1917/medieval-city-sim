@@ -97,6 +97,7 @@ export function updateCrime(sim: Simulation): void {
 export function raiseAlarm(sim: Simulation, kind: Alarm['kind'], x: number, y: number, suspect: number, victim: number): void {
   sim.alarms.push({ x, y, tick: sim.tick, kind, suspect, victim, handled: false });
   sim.crimeLog.push({ x, y, tick: sim.tick, kind });
+  sim.events.emit('crime', { kind, suspect, victim, x, y });
   if (sim.crimeLog.length > 2000) sim.crimeLog.splice(0, 500);
   // свидетели: страх, память
   sim.spatial.query(x, y, 6, scratch);

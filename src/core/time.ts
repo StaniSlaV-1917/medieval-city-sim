@@ -77,9 +77,14 @@ export function formatClock(tick: number): string {
   return `${String(t.hourInt).padStart(2, '0')}:${String(t.minute).padStart(2, '0')}`;
 }
 
+/** Календарный год (летоисчисление от основания города) */
+export function calendarYear(tick: number): number {
+  return CITY_FOUNDED_YEAR + getTime(tick).year - 1;
+}
+
 export function formatDate(tick: number): string {
   const t = getTime(tick);
-  return `${t.dayOfSeason}-й день ${SEASON_NAMES_GEN[t.season]}, ${t.year}-й год`;
+  return `${t.dayOfSeason}-й день ${SEASON_NAMES_GEN[t.season]}, ${calendarYear(tick)} год`;
 }
 
 /** Освещённость 0 (ночь) .. 1 (день) с учётом сезона */

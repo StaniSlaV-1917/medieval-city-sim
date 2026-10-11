@@ -434,6 +434,11 @@ const protest: ActionDef = {
   tick(ctx) {
     const { c, sim, rng } = ctx;
     const riot = sim.protest?.riot;
+    // совсем голодный уходит с площади искать хлеб
+    if (c.needs.hunger < 8 && rng.chance(0.05)) {
+      c.actionData.until = sim.tick;
+      return true;
+    }
     if (rng.chance(0.12)) say(c, rng.pick(riot ? ['Долой бургомистра!', 'Жги!', 'Хлеба или крови!', 'Бей стражу!', 'Отворяй амбары!'] : ['Хлеба!', 'Долой налоги!', 'Дети голодают!', 'Где справедливость?', 'Бургомистр, выходи!', 'Мы хотим есть!']), 40, false, sim.tick);
     c.animPhase += 0.5;
     return false;

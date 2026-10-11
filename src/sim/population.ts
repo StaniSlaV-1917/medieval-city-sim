@@ -2,6 +2,7 @@
 import type { Simulation } from './game';
 import { Citizen, CitizenState, Profession, Trait, Sex, Appearance, isChild, isElder } from './citizen';
 import { MALE_NAMES, FEMALE_NAMES, SURNAMES } from './names';
+import { professionForWorkplace } from '../data/professions';
 import { BuildingType, BUILDING_DEFS, Building, District } from '../world/buildings';
 import { RNG } from '../core/rng';
 import { TICKS_PER_YEAR } from '../core/time';
@@ -411,51 +412,7 @@ export function assignJob(sim: Simulation, c: Citizen, b: Building, prof: Profes
 }
 
 export function professionFor(type: BuildingType, index: number): Profession {
-  switch (type) {
-    case BuildingType.Farm:
-      return Profession.Farmer;
-    case BuildingType.Mill:
-      return Profession.Miller;
-    case BuildingType.Bakery:
-      return Profession.Baker;
-    case BuildingType.Butcher:
-      return Profession.Butcher;
-    case BuildingType.Smithy:
-      return Profession.Smith;
-    case BuildingType.Carpenter:
-    case BuildingType.Sawmill:
-      return type === BuildingType.Sawmill ? Profession.Woodcutter : Profession.Carpenter;
-    case BuildingType.Mason:
-      return Profession.Mason;
-    case BuildingType.Quarry:
-      return Profession.Quarryman;
-    case BuildingType.Tannery:
-      return Profession.Tanner;
-    case BuildingType.Merchant:
-    case BuildingType.Warehouse:
-    case BuildingType.MarketStall:
-      return Profession.Merchant;
-    case BuildingType.Tavern:
-      return index === 2 ? Profession.Bard : Profession.Innkeeper;
-    case BuildingType.TownHall:
-      return index === 0 ? Profession.Burgomaster : index === 1 ? Profession.Herald : Profession.Servant;
-    case BuildingType.Cathedral:
-      return Profession.Priest;
-    case BuildingType.Monastery:
-      return Profession.Monk;
-    case BuildingType.Barracks:
-      return Profession.Guard;
-    case BuildingType.Prison:
-      return Profession.Guard;
-    case BuildingType.Stable:
-      return Profession.Stablehand;
-    case BuildingType.FireTower:
-      return Profession.Fireman;
-    case BuildingType.Castle:
-      return Profession.Servant;
-    default:
-      return Profession.None;
-  }
+  return professionForWorkplace(type, index);
 }
 
 function assignProfessions(sim: Simulation, rng: RNG): void {

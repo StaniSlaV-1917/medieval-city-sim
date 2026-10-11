@@ -5,7 +5,7 @@ import { ACTIONS, ActionDef, actFor, goTo, enterBuilding, say, think, remember }
 import { makeCtx, interrupt } from '../ai/brain';
 import { BuildingType, BUILDING_DEFS, District } from '../world/buildings';
 import { EventKind } from '../events/chronicle';
-import { TICKS_PER_DAY, TICKS_PER_HOUR } from '../core/time';
+import { TICKS_PER_HOUR, TICKS_PER_DAY } from '../core/time';
 import { dist2 } from '../core/math';
 import { nearestWalkable } from '../world/world';
 
@@ -50,7 +50,12 @@ export function updateHealth(sim: Simulation): void {
     for (const c of sim.citizens) {
       if (!c.alive || c.inside >= 0 || c.action === 'fainted' || c.action === 'carried') continue;
       if ((c.actionData.lastFaint ?? -1e9) > tick - TICKS_PER_DAY) continue;
-      if ((c.needs.hunger <= 0 || c.needs.energy <= 0 || c.needs.health < 15) && sim.rng.chance(0.015)) faint(sim, c);
+      // Голодный обморок — не фон, а событие: только после нескольких часов на нуле
+      if (c.needs.hunger <= 0) {
+        if (!(c.actionData.starveSince > 0)) c.actionData.starveSince = tick;
+      } else if (c.actionData.starveSince > 0) c.actionData.starveSince = 0;
+      const starving = c.actionData.starveSince > 0 && tick - c.actionData.starveSince > TICKS_PER_HOUR * 3;
+      if ((starving || c.needs.energy <= 0 || c.needs.health < 15) && sim.rng.chance(0.015)) faint(sim, c);
     }
   }
   // Монахи ищут нуждающихся
@@ -310,6 +315,7 @@ export function die(sim: Simulation, c: Citizen, cause: string): void {
   c.order = null;
   const tick = sim.tick;
   sim.deaths++;
+  sim.events.emit('citizen:died', { id: c.id, cause });
   sim.chronicle.log(tick, EventKind.Death, `${fullName(c)} умер${c.sex === 'f' ? 'ла' : ''} ${cause} в возрасте ${c.age} лет.`, Math.round(c.x), Math.round(c.y), [c.id], 0.9);
   // семья
   const mourners: Citizen[] = [];

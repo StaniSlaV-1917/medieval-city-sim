@@ -3,7 +3,39 @@ import { Simulation } from '../sim/game';
 import type { Citizen } from '../sim/citizen';
 import type { World } from '../world/world';
 
-const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
+
+/**
+ * Цепочка миграций: migrate_N_to_N+1 приводит сохранение версии N к версии N+1.
+ * Каждая миграция меняет только то, что добавилось в её версии; deserialize применяет их по порядку.
+ */
+export const MIGRATIONS: Record<number, (d: Plain) => void> = {
+  // 1 → 2 (фаза 10–12): избранные, дневной снимок рынка и потоки, история реплик в разговорах, голод
+  1: (d) => {
+    if (!Array.isArray(d.favorites)) d.favorites = [];
+    const m = (d.market ?? {}) as Plain;
+    if (!m.dayStartStock) m.dayStartStock = null;
+    if (!m.flowsToday) m.flowsToday = {};
+    if (!m.flowsYesterday) m.flowsYesterday = {};
+    d.market = m;
+    if (Array.isArray(d.talks)) for (const [, t] of d.talks as [number, Plain][]) if (!Array.isArray(t.history)) t.history = [];
+    if (typeof d.famine !== 'boolean') d.famine = false;
+    d.version = 2;
+  },
+};
+
+/** Применить миграции до текущей версии; бросает ошибку, если версия новее или неизвестна */
+export function migrateSave(d: Plain): Plain {
+  let v = typeof d.version === 'number' ? (d.version as number) : 0;
+  if (v > SAVE_VERSION) throw new Error(`Сохранение из более новой версии игры (${v} > ${SAVE_VERSION})`);
+  while (v < SAVE_VERSION) {
+    const m = MIGRATIONS[v];
+    if (!m) throw new Error(`Нет миграции для версии сохранения ${v}`);
+    m(d);
+    v = d.version as number;
+  }
+  return d;
+}
 const DB_NAME = 'waldmark';
 const STORE = 'saves';
 
@@ -76,6 +108,7 @@ export function serialize(sim: Simulation): string {
     dragon: sim.dragon,
     guardTarget: sim.guardTarget,
     favorites: sim.favorites,
+    famine: sim.famine,
     pendingWedding: sim.pendingWedding,
     buildingVersion: sim.buildingVersion,
     tileVersion: sim.tileVersion,
@@ -84,8 +117,7 @@ export function serialize(sim: Simulation): string {
 }
 
 export function deserialize(json: string): Simulation {
-  const d = JSON.parse(json) as Plain;
-  if (d.version !== SAVE_VERSION) throw new Error('Несовместимая версия сохранения');
+  const d = migrateSave(JSON.parse(json) as Plain);
   const sim = new Simulation({ seedText: d.seedText as string, size: d.size as 'small' | 'medium' | 'large', skipPopulation: true });
   const w = sim.world;
   const sw = d.world as Plain;
@@ -153,6 +185,7 @@ export function deserialize(json: string): Simulation {
   sim.dragon = d.dragon as typeof sim.dragon;
   sim.guardTarget = d.guardTarget as number;
   sim.favorites = Array.isArray(d.favorites) ? (d.favorites as number[]) : [];
+  sim.famine = d.famine === true;
   sim.pendingWedding = d.pendingWedding as typeof sim.pendingWedding;
   sim.buildingVersion = (d.buildingVersion as number) + 1;
   sim.tileVersion = (d.tileVersion as number) + 1;

@@ -1,7 +1,8 @@
 // Приказы игрока жителям: категории, проверка характера, выполнение.
 import type { Simulation } from '../sim/game';
 import { Citizen, CitizenState, Order, OrderTarget, Trait, hasTrait, isChild, fullName, relation, changeRelation, Profession, isElder, professionName } from '../sim/citizen';
-import { ACTIONS, ActionDef, ActionCtx, actFor, goTo, goToBuilding, enterBuilding, say, think, remember, startTalkRef } from './actions';
+import { ACTIONS, ActionDef, ActionCtx, actFor, goTo, goToBuilding, enterBuilding, say, think, remember } from './actions';
+import { startTalk } from './talk';
 import { interrupt, makeCtx } from './brain';
 import { BuildingType, BUILDING_DEFS, Building } from '../world/buildings';
 import { EventKind } from '../events/chronicle';
@@ -103,6 +104,7 @@ export function giveOrder(sim: Simulation, c: Citizen, type: string, target: Ord
     say(c, t, 50, false, sim.tick);
     think(c, t);
     remember(c, sim.tick, `Отказался${c.sex === 'f' ? 'ась' : ''} выполнять дурной приказ.`, 0.2);
+    sim.events.emit('order:given', { citizen: c.id, type, refused: true });
     return `${fullName(c)} отказывается: «${t}»`;
   }
   const order: Order = { type, target, good, phase: 0, data: {}, givenAt: sim.tick };
@@ -111,6 +113,7 @@ export function giveOrder(sim: Simulation, c: Citizen, type: string, target: Ord
     say(c, rng.pick(HESITATE), 50, false, sim.tick);
   } else say(c, rng.pick(ACCEPT), 40, false, sim.tick);
   c.order = order;
+  sim.events.emit('order:given', { citizen: c.id, type, refused: false });
   interrupt(sim, c);
   // немедленно начать
   const ctx = makeCtx(sim, c);
@@ -373,7 +376,7 @@ export const orderAction: ActionDef = {
           actFor(ctx, 40);
           return;
         }
-        if (startTalkRef && startTalkRef(sim, c, t)) {
+        if (startTalk(sim, c, t)) {
           c.order = null; // разговор продолжит система бесед
           if (o.type === 'befriend') changeRelation(c, t.id, 6);
           if (o.type === 'court') {

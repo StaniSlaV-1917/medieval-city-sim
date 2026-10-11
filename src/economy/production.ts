@@ -17,9 +17,9 @@ export interface Recipe {
 }
 
 export const RECIPES: Partial<Record<BuildingType, Recipe>> = {
-  [BuildingType.Farm]: { inputs: { tools: 0.015 }, outputs: { grain: 1.8, meat: 0.14, hide: 0.05 }, sells: [], stockHours: 0, markup: 1 },
-  [BuildingType.Mill]: { inputs: { grain: 12 }, outputs: { flour: 12 }, sells: ['flour'], stockHours: 6, markup: 1.1 },
-  [BuildingType.Bakery]: { inputs: { flour: 3.6 }, outputs: { bread: 11 }, sells: ['bread'], stockHours: 6, markup: 1 },
+  [BuildingType.Farm]: { inputs: { tools: 0.015 }, outputs: { grain: 2.0, meat: 0.14, hide: 0.05 }, sells: [], stockHours: 0, markup: 1 },
+  [BuildingType.Mill]: { inputs: { grain: 13 }, outputs: { flour: 13 }, sells: ['flour'], stockHours: 6, markup: 1.1 },
+  [BuildingType.Bakery]: { inputs: { flour: 4.2 }, outputs: { bread: 13 }, sells: ['bread'], stockHours: 6, markup: 1 },
   [BuildingType.Butcher]: { inputs: { meat: 0 }, outputs: {}, sells: ['meat'], stockHours: 8, markup: 1.15 },
   [BuildingType.Tannery]: { inputs: { hide: 1 }, outputs: { leather: 1 }, sells: ['leather'], stockHours: 8, markup: 1.1 },
   [BuildingType.Sawmill]: { inputs: { wood: 2, tools: 0.02 }, outputs: { planks: 2 }, sells: ['planks', 'wood'], stockHours: 6, markup: 1.1 },

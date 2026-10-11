@@ -302,3 +302,5 @@ kbd { background: #fbf6ea; border: 1px solid var(--border); border-radius: 3px; 
 #subtitles .sl.cur { color: var(--ink); font-weight: bold; }
 #subtitles .sl .nm { color: #2a4a9a; font-weight: bold; }
 #subtitles .sl.me .nm { color: #8a5a1a; }
+.win .planned { opacity: 0.75; }
+.win .chip.planned { border-style: dashed; cursor: help; }

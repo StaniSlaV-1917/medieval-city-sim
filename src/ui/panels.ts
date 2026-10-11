@@ -2,7 +2,6 @@
 // Указы/Развитие/Регион пока показывают то, что уже есть в симуляции; полная механика — в фазах 13–17.
 import type { Game } from '../main';
 import type { Win } from './windows';
-import { Profession } from '../sim/citizen';
 import { BUILDING_DEFS, BuildingType } from '../world/buildings';
 import { STAGE_NAMES } from '../sim/construction';
 import { Tile } from '../world/tiles';
@@ -10,6 +9,9 @@ import { PAUSE_EVENTS, saveSettings } from './settings';
 import { plural } from '../core/math';
 import { GOOD_INFO, GOODS } from '../economy/goods';
 import { TICKS_PER_DAY } from '../core/time';
+import { EDICT_DEFS } from '../data/edicts';
+import { DEV_NODES } from '../data/development';
+import { esc } from './topbar';
 
 abstract class WinPanel {
   el: HTMLElement;
@@ -40,55 +42,56 @@ abstract class WinPanel {
   protected abstract render(): void;
 }
 
-/** Указы: налоги, стража, милостыня — то, чем игрок уже управляет */
+/** Указы: таблица EDICT_DEFS — действующие ползунки и заготовки будущих указов */
 export class EdictsPanel extends WinPanel {
   constructor(win: Win, game: Game) {
     super(win, game);
     this.el.classList.add('edicts');
     this.el.addEventListener('input', (e) => {
       const t = e.target as HTMLInputElement;
-      if (t.id === 'ed-tax') {
-        this.game.sim.taxRate = Number(t.value) / 100;
-        this.el.querySelector('#ed-taxlabel')!.textContent = `${t.value}%`;
-      }
-      if (t.id === 'ed-guards') {
-        this.game.sim.guardTarget = Number(t.value);
-        this.el.querySelector('#ed-guardlabel')!.textContent = t.value;
-      }
+      const def = EDICT_DEFS.find((d) => d.id === t.dataset.edict);
+      if (!def || !def.set || !def.slider) return;
+      def.set(this.game.sim, Number(t.value));
+      const lbl = this.el.querySelector(`[data-edict-label="${def.id}"]`);
+      if (lbl) lbl.textContent = def.slider.format(Number(t.value));
     });
   }
 
   protected render(): void {
     const sim = this.game.sim;
-    const guards = sim.citizens.filter((c) => c.alive && c.profession === Profession.Guard && !c.actionData.visitor).length;
-    const gt = sim.guardTarget >= 0 ? sim.guardTarget : guards;
-    const tax = Math.round(sim.taxRate * 100);
-    const slider = this.el.querySelector<HTMLInputElement>('#ed-tax');
-    if (slider) {
-      // не перерисовывать, пока двигают ползунки
-      this.el.querySelector('#ed-stats')!.innerHTML = this.statsHtml(guards);
+    if (this.el.querySelector('[data-edict]')) {
+      // не перерисовывать, пока двигают ползунки — обновить только статусы
+      for (const def of EDICT_DEFS) {
+        const st = this.el.querySelector(`[data-edict-status="${def.id}"]`);
+        if (st && def.status) st.textContent = def.status(sim);
+      }
+      this.el.querySelector('#ed-stats')!.innerHTML = this.statsHtml();
       return;
     }
+    const active = EDICT_DEFS.filter((d) => !d.planned)
+      .map((d) => {
+        const v = d.get ? d.get(sim) : 0;
+        const sl = d.slider!;
+        return `<div class="section"><h3>${d.name}</h3>
+        <div class="slider"><label>${d.name}: <span data-edict-label="${d.id}">${sl.format(v)}</span></label><input type="range" data-edict="${d.id}" min="${sl.min}" max="${sl.max}" step="${sl.step}" value="${v}"></div>
+        <div class="muted small">${d.desc}</div>
+        <div class="small" data-edict-status="${d.id}">${d.status ? d.status(sim) : ''}</div></div>`;
+      })
+      .join('');
+    const planned = EDICT_DEFS.filter((d) => d.planned).map((d) => `<div class="row2 planned" data-tip="${esc(d.desc)}"><span>${d.name}</span><span class="muted">скоро</span></div>`).join('');
     this.el.innerHTML = `
-      <div class="sub">Воля правителя. Указы о ценах, цехах и праздниках появятся позже — пока в силе налоги и стража.</div>
-      <div class="section"><h3>Казна</h3>
-        <div class="slider"><label for="ed-tax">Подать: <span id="ed-taxlabel">${tax}%</span></label><input id="ed-tax" type="range" min="0" max="30" value="${tax}"></div>
-        <div class="muted small">Высокая подать наполняет казну, но растит недовольство. Бедняки получают милостыню из казны.</div>
-      </div>
-      <div class="section"><h3>Стража</h3>
-        <div class="slider"><label for="ed-guards">Стражников: <span id="ed-guardlabel">${gt}</span></label><input id="ed-guards" type="range" min="2" max="30" value="${gt}"></div>
-        <div class="muted small">Казарма набирает или распускает людей постепенно. Стража ловит воров и гасит бунты, но каждому платят из казны.</div>
-      </div>
-      <div class="section"><h3>Положение дел</h3><div id="ed-stats">${this.statsHtml(guards)}</div></div>`;
+      <div class="sub">Воля правителя. Действуют подать и стража; остальные указы появятся в следующих фазах.</div>
+      ${active}
+      <div class="section"><h3>Положение дел</h3><div id="ed-stats">${this.statsHtml()}</div></div>
+      <div class="section"><h3>Будущие указы</h3>${planned}</div>`;
   }
 
-  private statsHtml(guards: number): string {
+  private statsHtml(): string {
     const sim = this.game.sim;
     const jailed = sim.citizens.filter((c) => c.alive && c.jailedUntil > sim.tick).length;
     const wanted = sim.citizens.filter((c) => c.alive && c.flags & 2).length;
-    const crimesToday = sim.crimeLog.filter((r) => sim.tick - r.tick < TICKS_PER_DAY).length;
-    return `<div>Казна: <b>${Math.round(sim.treasury)}</b> монет · налогов за день ${sim.lastTax} · милостыни ${sim.lastCharity}</div>
-      <div>Недовольство: <b>${Math.round(sim.unrest)}</b>/100 · стражников ${guards}</div>
+    const crimesToday = sim.justice.crimesSince(sim.tick - TICKS_PER_DAY);
+    return `<div>Казна: <b>${Math.round(sim.treasury)}</b> монет · недовольство: <b>${Math.round(sim.unrest)}</b>/100</div>
       <div>Преступлений за сутки: ${crimesToday} · в тюрьме ${jailed} · в розыске ${wanted}</div>`;
   }
 }
@@ -133,7 +136,8 @@ export class DevelopmentPanel extends WinPanel {
         <div>Без работы: ${st.unemployed} · руин: ${ruins.length}</div>
       </div>
       <div class="section"><h3>Стройки (${sites.length})</h3>${sitesHtml}</div>
-      <div class="section"><h3>Здания (${bs.length - ruins.length})</h3><div class="chips">${list}</div></div>`;
+      <div class="section"><h3>Здания (${bs.length - ruins.length})</h3><div class="chips">${list}</div></div>
+      <div class="section"><h3>Дерево развития</h3><div class="muted small">Узлы описаны, механика откроется в будущих фазах.</div><div class="chips">${DEV_NODES.map((n) => `<span class="chip planned" data-tip="${esc(`<b>${n.name}</b><br>${n.desc}<br><span class='muted'>Ступень ${n.tier} · ${n.cost} монет · открывает: ${n.unlocks}${n.requires.length ? ` · требует: ${n.requires.map((r) => DEV_NODES.find((x) => x.id === r)?.name ?? r).join(', ')}` : ''}</span>`)}">${n.name}</span>`).join('')}</div></div>`;
   }
 }
 

@@ -11,6 +11,7 @@ import { RNG } from '../core/rng';
 import { pay, householdMoney } from '../economy/money';
 import { RECIPES, wantedStock, addStock, producersOf } from '../economy/production';
 import { sellersOf, isOpenAt } from '../economy/market';
+import { startTalk } from './talk';
 import { Good, GOOD_INFO } from '../economy/goods';
 import { EventKind } from '../events/chronicle';
 
@@ -74,7 +75,18 @@ export function goToBuilding(ctx: ActionCtx, b: Building): boolean {
 
 export function enterBuilding(ctx: ActionCtx, b: Building): void {
   const c = ctx.c;
-  if (b.id === c.home) {
+  // Груз, который нёс на работу (прерванная доставка), — выгрузить на рабочем месте, а не домой
+  if (c.actionData.hauling && b.id === c.workplace) {
+    for (const g of Object.keys(c.inventory) as Good[]) {
+      const n = c.inventory[g] ?? 0;
+      if (n > 0 && GOOD_INFO[g]) {
+        addStock(b, g, n);
+        c.inventory[g] = 0;
+      }
+    }
+    c.actionData.hauling = 0;
+  }
+  if (b.id === c.home && !c.actionData.hauling) {
     // принёс еду домой — в общий запас семьи
     for (const g of ['bread', 'meat'] as const) {
       const n = c.inventory[g] ?? 0;
@@ -587,24 +599,37 @@ const buyFood: ActionDef = {
   id: 'buy_food',
   interruptible: false,
   score(ctx) {
-    const { c, hour, sim } = ctx;
-    if (isChild(c)) return 0;
+    const { c, hour, sim, sched } = ctx;
     const h = c.needs.hunger;
+    const home = homeOf(ctx);
+    // хлеб в руках — считай, уже дома
+    const homeBread = (home ? home.storage['bread'] ?? 0 : 0) + (c.inventory['bread'] ?? 0);
+    // Дети с 5 лет сами бегут за хлебом, если дома пусто и они голодны
+    if (isChild(c) && (c.age < 5 || h > 40 || homeBread >= 1)) return 0;
     const purse = householdMoney(sim, c);
     const price = priceOf(sim, 'bread');
     if (purse < price) return 0;
-    const home = homeOf(ctx);
-    const homeBread = home ? home.storage['bread'] ?? 0 : 0;
     const familyNeed = home ? home.residents.length : 1;
     const canFeedFamily = home && homeBread < familyNeed && purse >= price * (familyNeed + 1);
     if (h > 55 && !canFeedFamily) return 0;
     if ((c.actionData.buyFail ?? 0) > sim.tick) return 0;
     let s = (62 - h) * 1.1;
-    if (canFeedFamily) {
-      const kids = home!.residents.filter((id) => isChild(sim.citizens[id])).length;
-      const feed = 30 + kids * 6 + (c.profession === Profession.Housewife || c.profession === Profession.Servant ? 10 : 0);
+    if (canFeedFamily && !isChild(c)) {
+      let kids = 0;
+      let kidsHungry = 0;
+      for (const id of home!.residents) {
+        const k = sim.citizens[id];
+        if (!k || !k.alive || !isChild(k)) continue;
+        kids++;
+        if (k.needs.hunger < 35) kidsHungry++;
+      }
+      const feed = 30 + kids * 6 + (c.profession === Profession.Housewife || c.profession === Profession.Servant || c.workplace < 0 ? 12 : 0);
       s = Math.max(s, feed);
       if (homeBread === 0) s += 8;
+      // голодные дети дома — забота семьи, важнее работы
+      if (kidsHungry) s += 25 + kidsHungry * 5;
+      // свободное от работы время — самое время запастись
+      if (!isWorkHour(sched, hour) || c.workplace < 0) s += 12;
     }
     if (homeBread > 0 && home) {
       const d = Math.abs(home.doorX - c.x) + Math.abs(home.doorY - c.y);
@@ -640,9 +665,13 @@ const buyFood: ActionDef = {
     const good: Good = c.actionData.good === 1 ? 'meat' : 'bread';
     const price = sim.market.retailPrice(b, good);
     let n = 1;
-    if (purse >= price * 3 && !hasTrait(c, Trait.Greedy)) n = 2;
-    if (home && family >= 3 && purse >= price * (family + 1)) n = Math.min(7, family + 1);
+    const homeBread = (home ? home.storage['bread'] ?? 0 : 0) + (c.inventory['bread'] ?? 0);
+    if (purse >= price * 3 && !hasTrait(c, Trait.Greedy) && homeBread < 1) n = 2;
+    if (home && family >= 3 && purse >= price * (family + 1) && homeBread < family) n = Math.min(7, family + 1);
     if (hasTrait(c, Trait.Greedy) && price > 1) n = Math.min(n, 2);
+    // дома и так полно хлеба — не скупать лавку, оставить соседям
+    if (home && homeBread >= family * 2) n = 1;
+    if (isChild(c)) n = Math.min(n, 3);
     const got = sim.market.buyRetail(sim, c, b, good, n);
     if (got <= 0) {
       think(c, pickText(rng, ['Всё раскупили!', 'Полки пустые…', 'Опять без хлеба.']));
@@ -792,6 +821,7 @@ const haul: ActionDef = {
       if (got > 0) {
         c.inventory[good] = (c.inventory[good] ?? 0) + got;
         c.actionData.got = got;
+        c.actionData.hauling = 1;
         if (rng.chance(0.3)) say(c, pickText(rng, ['Вот, хозяин просил.', 'Грузи, да не всё сразу.', 'Почём нынче?']), 30, false, sim.tick);
       } else {
         think(c, pickText(rng, ['Пусто. Зря ходил.', 'Не продали — денег не хватило.']));
@@ -807,6 +837,7 @@ const haul: ActionDef = {
       addStock(b, good, n);
       c.inventory[good] = 0;
     }
+    c.actionData.hauling = 0;
     if (BUILDING_DEFS[b.type].enterable && b.type !== BuildingType.MarketStall) enterBuilding(ctx, b);
     actFor(ctx, 5);
   },
@@ -1194,17 +1225,11 @@ const visitFriend: ActionDef = {
     if (o && o.alive && o.inside < 0 && Math.abs(o.x - c.x) + Math.abs(o.y - c.y) < 3 && o.state !== CitizenState.Sleeping && o.state !== CitizenState.Talking) {
       c.talkCooldown = 0;
       o.talkCooldown = 0;
-      if (startTalkRef && startTalkRef(sim, c, o)) return;
+      if (startTalk(sim, c, o)) return;
     }
     actFor(ctx, 10);
   },
 };
-
-/** Ссылка на запуск разговора (устанавливается из conversation.ts, чтобы избежать циклического импорта) */
-export let startTalkRef: ((sim: Simulation, a: Citizen, b: Citizen) => boolean) | null = null;
-export function setStartTalk(fn: (sim: Simulation, a: Citizen, b: Citizen) => boolean): void {
-  startTalkRef = fn;
-}
 
 /** Покупка изделий, кожи, инструментов — состоятельные горожане тратят деньги */
 const shopLuxury: ActionDef = {

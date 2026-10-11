@@ -214,6 +214,7 @@ function finishConstruction(sim: Simulation, b: Building): void {
   b.underConstruction = undefined;
   b.buildStage = undefined;
   b.condition = 1;
+  sim.events.emit('building:done', { id: b.id });
   for (const k of Object.keys(b.storage)) if (k.startsWith('_paid')) delete b.storage[k];
   sim.buildingVersion++;
   sim.pathfinder.invalidate();
@@ -422,6 +423,7 @@ function births(sim: Simulation): void {
     remember(h, sim.tick, `Родил${sex === 'm' ? 'ся сын' : 'ась дочь'} ${baby.firstName}.`, 1, baby.id, 'birth');
     baby.bio.push({ tick: sim.tick, text: `Родил${sex === 'm' ? 'ся' : 'ась'} в Вальдмарке в семье ${fullName(h)}.` });
     sim.chronicle.log(sim.tick, EventKind.Birth, `У ${h.firstName} и ${c.firstName} ${h.lastName} родил${sex === 'm' ? 'ся сын' : 'ась дочь'} ${baby.firstName}.`, home.doorX, home.doorY, [baby.id, c.id, h.id], 0.8);
+    sim.events.emit('citizen:born', { id: baby.id, parents: [h.id, c.id] });
     c.needs.energy = Math.max(10, c.needs.energy - 30);
     c.mood += 20;
     h.mood += 15;

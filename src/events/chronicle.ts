@@ -26,7 +26,7 @@ export interface ChronicleEvent {
 export class Chronicle {
   events: ChronicleEvent[] = [];
   private nextId = 1;
-  /** Слушатели (UI) */
+  /** Слушатели (устарело: используйте sim.events.on('chronicle')) */
   listeners: ((e: ChronicleEvent) => void)[] = [];
   maxEvents = 600;
 

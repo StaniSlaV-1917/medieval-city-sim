@@ -32,6 +32,7 @@ export function igniteBuilding(sim: Simulation, id: number, cause: string, inten
   if (b.type === BuildingType.Well || b.type === BuildingType.Pillory) return false;
   sim.fires.push({ building: id, intensity, started: sim.tick, cause, fighters: 0 });
   sim.crimeLog.push({ x: b.doorX, y: b.doorY, tick: sim.tick, kind: 'fire' });
+  sim.events.emit('building:fire', { id, cause });
   const name = sim.buildingDefName(b);
   sim.chronicle.log(sim.tick, EventKind.Disaster, `Пожар! Горит ${b.name ? `«${b.name}»` : name.toLowerCase()} (${cause}).`, b.doorX, b.doorY, [], 0.9);
   // жильцы выбегают
@@ -254,6 +255,7 @@ export function damageBuilding(sim: Simulation, b: Building, amount: number, cau
   if (b.condition <= 0) {
     b.lit = false;
     sim.onBuildingDestroyed?.(b, cause);
+    sim.events.emit('building:destroyed', { id: b.id, cause });
   }
 }
 

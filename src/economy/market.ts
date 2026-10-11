@@ -196,7 +196,7 @@ export function sellersOf(sim: Simulation, good: Good, x: number, y: number, hou
   for (const b of sim.world.buildings) {
     const r = RECIPES[b.type];
     if (!r || !r.sells.includes(good)) continue;
-    if ((b.storage[good] ?? 0) <= 0) continue;
+    if ((b.storage[good] ?? 0) < 1) continue;
     if (openOnly && !isOpenAt(b, hour)) continue;
     const dx = b.doorX - x;
     const dy = b.doorY - y;
