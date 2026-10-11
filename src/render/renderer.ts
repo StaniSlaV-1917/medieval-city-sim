@@ -13,6 +13,14 @@ import { makeCanvas, ctx2d, hash2 } from './atlas';
 import { Citizen, CitizenState } from '../sim/citizen';
 import { getCitizenSprite } from './citizenSprites';
 import { drawBubbles } from './bubbles';
+
+export interface BubbleOpts {
+  density: number;
+  favorites: number[];
+  topInset: number;
+  bottomInset: number;
+  obstacles: { x: number; y: number; w: number; h: number }[];
+}
 import { drawWeather } from './weather';
 import { getAnimalSprite } from './animalSprites';
 import { drawOverlay } from './overlays';
@@ -50,6 +58,10 @@ export class Renderer {
   /** Выделенный житель/здание */
   selectedCitizen = -1;
   selectedBuilding = -1;
+  bubbleCanvas: HTMLCanvasElement;
+  private bg: CanvasRenderingContext2D;
+  dpr = 1;
+  bubbleOpts: BubbleOpts = { density: 1, favorites: [], topInset: 44, bottomInset: 48, obstacles: [] };
   hoverCitizen = -1;
   /** Отладочная информация */
   debug = { drawn: 0, lights: 0 };
@@ -65,9 +77,21 @@ export class Renderer {
     this.tilemap = new TileMapRenderer(sim.world);
     this.lightCanvas = makeCanvas(canvas.width, canvas.height);
     this.lg = ctx2d(this.lightCanvas);
+    // Отдельный холст для облачков: чёткий текст при любом DPR
+    this.bubbleCanvas = document.createElement('canvas');
+    this.bubbleCanvas.id = 'bubbles';
+    canvas.parentElement?.insertBefore(this.bubbleCanvas, canvas.nextSibling);
+    this.bg = ctx2d(this.bubbleCanvas);
   }
 
   resize(w: number, h: number): void {
+    const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+    this.dpr = dpr;
+    this.bubbleCanvas.width = Math.round(w * dpr);
+    this.bubbleCanvas.height = Math.round(h * dpr);
+    this.bubbleCanvas.style.width = `${w}px`;
+    this.bubbleCanvas.style.height = `${h}px`;
+    this.bg = ctx2d(this.bubbleCanvas);
     this.canvas.width = w;
     this.canvas.height = h;
     this.lightCanvas.width = w;
@@ -141,8 +165,11 @@ export class Renderer {
     // Погода
     g.setTransform(1, 0, 0, 1, 0, 0);
     drawWeather(g, this, sim, dt);
-    // Пузыри речи
-    drawBubbles(g, this, sim);
+    // Облачки речи — на отдельном холсте с учётом DPR
+    const bg = this.bg;
+    bg.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    bg.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    drawBubbles(bg, this, sim, { density: this.bubbleOpts.density, favorites: this.bubbleOpts.favorites, viewW: this.canvas.width, viewH: this.canvas.height, topInset: this.bubbleOpts.topInset, bottomInset: this.bubbleOpts.bottomInset, obstacles: this.bubbleOpts.obstacles });
   }
 
   private collectDrawables(x0: number, y0: number, x1: number, y1: number): void {

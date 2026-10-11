@@ -42,8 +42,8 @@ export function priceOf(sim: Simulation, g: Good): number {
 
 // ---------------------------------------------------------------- Утилиты
 
-export function say(c: Citizen, text: string, ticks = 40, thought = false, tick = 0): void {
-  c.speech = { text, until: tick + ticks, thought };
+export function say(c: Citizen, text: string, ticks = 40, thought = false, tick = 0, emo?: string): void {
+  c.speech = { text, until: tick + ticks, thought, from: tick, emo };
 }
 
 export function think(c: Citizen, text: string): void {

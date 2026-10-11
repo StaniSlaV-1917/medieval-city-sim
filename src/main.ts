@@ -23,6 +23,7 @@ import { BuildBar } from './ui/buildbar';
 import { Toasts } from './ui/toasts';
 import { loadSettings, saveSettings, UiSettings } from './ui/settings';
 import { EdictsPanel, DevelopmentPanel, TradePanel, RegionPanel, SettingsPanel } from './ui/panels';
+import { Subtitles } from './ui/subtitles';
 import { ChronicleEvent, EventKind } from './events/chronicle';
 
 /** Панель, живущая внутри окна */
@@ -48,7 +49,10 @@ export class Game {
   outliner: Outliner;
   buildbar: BuildBar;
   toasts: Toasts;
+  subtitles: Subtitles;
   settings: UiSettings;
+  /** За кем следит камера (для субтитров) */
+  followId = -1;
   private panels = new Map<string, Panelled>();
   private lastAutosave = 0;
   private lastAutosaveDay = -1;
@@ -82,6 +86,7 @@ export class Game {
     this.minimap = new Minimap(ui, this);
     this.buildbar = new BuildBar(ui, this);
     this.toasts = new Toasts(ui, this);
+    this.subtitles = new Subtitles(ui, this);
     // Окна
     const mk = (id: string, title: string, width: number, anchor: 'left' | 'right' | 'center', extra: Partial<ConstructorParameters<typeof Win>[1]> = {}): Win => new Win(this.windows, { id, title, width, anchor, maxHeight: 520, ...extra });
     this.marketPanel = new MarketPanel(mk('economy', 'Хозяйство', 380, 'left'), this);
@@ -138,6 +143,8 @@ export class Game {
     return null;
   }
 
+  private lastToast = 0;
+
   private onEvent(e: ChronicleEvent): void {
     const cls = this.eventClass(e);
     const actor = e.actors[0];
@@ -146,7 +153,14 @@ export class Game {
       this.toasts.show(`<b>Пауза:</b> ${e.text}`, e.kind, e.x, e.y, actor);
       return;
     }
-    if (this.settings.toasts && (e.importance >= 0.6 || (cls && cls !== 'death' && cls !== 'birth'))) this.toasts.show(e.text, e.kind, e.x, e.y, actor);
+    if (!this.settings.toasts) return;
+    const important = e.importance >= 0.7 || (cls !== null && cls !== 'death' && cls !== 'birth' && cls !== 'crime');
+    if (!important) return;
+    // не чаще одного уведомления в пару секунд, чтобы на 8× не засыпать экран
+    const now = performance.now();
+    if (now - this.lastToast < 2500) return;
+    this.lastToast = now;
+    this.toasts.show(e.text, e.kind, e.x, e.y, actor);
   }
 
   setSpeed(sp: number): void {
@@ -173,6 +187,7 @@ export class Game {
 
   followCitizen(id: number): void {
     const cam = this.renderer.camera;
+    this.followId = id;
     cam.follow = () => {
       const c = this.sim.citizens[id];
       if (!c || !c.alive) return null;
@@ -328,7 +343,14 @@ export class Game {
     this.input.update(dt);
     cam.update(dt);
     this.renderer.canvas.style.cursor = this.targeting || this.godTargeting ? 'crosshair' : 'default';
+    const bo = this.renderer.bubbleOpts;
+    bo.density = this.settings.bubbleDensity;
+    bo.favorites = this.sim.favorites;
+    bo.topInset = this.clean ? 4 : 44;
+    bo.bottomInset = this.clean ? 4 : 48;
+    bo.obstacles = this.clean ? [] : this.windows.uiRects();
     this.renderer.render(dt);
+    this.subtitles.update();
     this.topbar.setStatus(`${this.fps.toFixed(0)} FPS · объектов ${this.renderer.debug.drawn}${this.renderer.showOverlay !== 'none' ? ` · ${OVERLAY_NAMES[this.renderer.showOverlay]}` : ''}${this.paused ? ' · ПАУЗА' : ''}`);
     this.topbar.update();
     this.leftbar.update(this);

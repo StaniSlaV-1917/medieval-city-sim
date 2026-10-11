@@ -438,6 +438,7 @@ const flee: ActionDef = {
 };
 
 export function startChase(sim: Simulation, g: Citizen, suspect: Citizen, isGuard: boolean): void {
+  if (g.id === suspect.id) return;
   if (g.action === 'chase' || g.action === 'arrested' || g.jailedUntil > sim.tick) return;
   interrupt(sim, g);
   g.action = 'chase';
@@ -505,6 +506,7 @@ function dispatchGuards(sim: Simulation): void {
     for (const g of sim.citizens) {
       if (!g.alive || g.profession !== Profession.Guard || g.inside >= 0 && g.state === CitizenState.Sleeping) continue;
       if (g.action === 'chase' || g.action === 'arrested' || g.action === 'escort' || g.state === CitizenState.Sleeping) continue;
+      if (g.id === a.suspect || g.jailedUntil > sim.tick) continue; // стражник не задерживает сам себя
       const d = dist2(g.x, g.y, a.x, a.y);
       if (d < bestD) {
         bestD = d;

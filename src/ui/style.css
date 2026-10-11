@@ -18,6 +18,7 @@ html, body {
   user-select: none;
 }
 #game { position: absolute; inset: 0; width: 100%; height: 100%; display: block; image-rendering: pixelated; image-rendering: crisp-edges; cursor: default; }
+#bubbles { position: absolute; inset: 0; width: 100%; height: 100%; display: block; pointer-events: none; }
 #ui { position: absolute; inset: 0; pointer-events: none; }
 #ui > * { pointer-events: auto; }
 
@@ -272,7 +273,7 @@ kbd { background: #fbf6ea; border: 1px solid var(--border); border-radius: 3px; 
 #minimap .ovbar .btn { flex: 1; font-size: 10px; padding: 1px 2px; }
 
 /* ---------- Уведомления ---------- */
-#toasts { position: absolute; left: 50%; bottom: 48px; transform: translateX(-50%); width: 340px; display: flex; flex-direction: column; gap: 4px; z-index: 60; pointer-events: none; }
+#toasts { position: absolute; left: 50%; top: 46px; transform: translateX(-50%); width: 340px; display: flex; flex-direction: column; gap: 4px; z-index: 5000; pointer-events: none; }
 .toast { pointer-events: auto; display: flex; align-items: center; gap: 6px; padding: 5px 8px; font-size: 12px; background: rgba(250,246,236,0.96); border: 1px solid var(--border); border-left: 4px solid var(--gold); border-radius: 3px; box-shadow: 0 2px 6px var(--shadow); transition: opacity 0.6s; }
 .toast .tx { flex: 1; }
 .toast .x { font: inherit; font-size: 12px; background: none; border: none; cursor: pointer; color: var(--ink-soft); }
@@ -294,3 +295,10 @@ kbd { background: #fbf6ea; border: 1px solid var(--border); border-radius: 3px; 
   #chron, #chron.collapsed { width: 300px; }
   #chron .list { max-height: 120px; }
 }
+
+/* ---------- Субтитры ---------- */
+#subtitles { position: absolute; left: 50%; bottom: 52px; transform: translateX(-50%); width: 560px; max-width: 70%; padding: 6px 12px; font-size: 14px; z-index: 45; pointer-events: none; }
+#subtitles .sl { padding: 1px 0; color: var(--ink-soft); }
+#subtitles .sl.cur { color: var(--ink); font-weight: bold; }
+#subtitles .sl .nm { color: #2a4a9a; font-weight: bold; }
+#subtitles .sl.me .nm { color: #8a5a1a; }

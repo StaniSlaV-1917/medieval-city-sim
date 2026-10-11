@@ -339,6 +339,22 @@ export class WindowManager {
     return false;
   }
 
+  /** Прямоугольники открытых окон и постоянных панелей в экранных px (для раскладки облачков) */
+  uiRects(): { x: number; y: number; w: number; h: number }[] {
+    const out: { x: number; y: number; w: number; h: number }[] = [];
+    for (const w of this.wins) {
+      if (!w.open) continue;
+      const b = w.el.getBoundingClientRect();
+      out.push({ x: b.left, y: b.top, w: b.width, h: b.height });
+    }
+    for (const el of Array.from(this.root.querySelectorAll<HTMLElement>('[data-fixed]'))) {
+      if (el.offsetParent === null) continue;
+      const b = el.getBoundingClientRect();
+      if (b.width > 0 && b.height > 0) out.push({ x: b.left, y: b.top, w: b.width, h: b.height });
+    }
+    return out;
+  }
+
   setScale(s: number): void {
     this.scale = s;
     (this.root.style as unknown as { zoom: string }).zoom = String(s);

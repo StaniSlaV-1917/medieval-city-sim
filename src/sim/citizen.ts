@@ -161,6 +161,10 @@ export interface Speech {
   until: number;
   /** Мысль (не вслух) */
   thought: boolean;
+  /** Тик начала (для плавного появления) */
+  from?: number;
+  /** Эмоция для значка в облачке */
+  emo?: string;
 }
 
 export interface Citizen {

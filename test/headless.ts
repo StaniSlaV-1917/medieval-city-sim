@@ -7,6 +7,9 @@ import type { CitySize } from '../src/world/generator';
 import { collectStats as collectStatsNow } from '../src/sim/stats';
 import { serialize, deserialize } from '../src/save/save';
 import { readFileSync } from 'node:fs';
+import { dialogueLineCount } from '../src/ai/dialogue';
+import { layoutBubbles, BubbleItem } from '../src/render/bubbleLayout';
+import { RNG } from '../src/core/rng';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -160,6 +163,82 @@ for (const c of cases) {
   for (let t = 0; t < 300; t++) again.step();
   check(again.citizens.every((z) => Number.isFinite(z.x)), 'NaN после шага загруженной копии');
   console.log(`  цикл сериализации: ${(serialize(sim).length / 1024).toFixed(0)} КБ, население ${pop1}`);
+}
+
+// ---------------------------------------------------------------- Диалоги и облачка (фаза 11)
+{
+  console.log('\n=== Диалоги: банк реплик, структура разговоров, облачка ===');
+  const n = dialogueLineCount();
+  check(n >= 1000, `в банке реплик ${n} строк, нужно не меньше 1000`);
+  console.log(`  шаблонов реплик: ${n}`);
+  const sim = new Simulation({ seedText: 'разговоры', size: 'small' });
+  const seen = new Map<number, { who: number; text: string; topic?: string; reply?: boolean }[]>();
+  const done: { who: number; text: string; topic?: string; reply?: boolean }[][] = [];
+  const lens = new Map<number, number>();
+  for (let t = 0; t < TICKS_PER_DAY; t++) {
+    sim.step();
+    for (const [k, tk] of sim.talks) {
+      seen.set(k, [...(tk.history ?? [])]);
+      lens.set(k, tk.lines);
+    }
+    for (const [k, h] of seen) {
+      if (sim.talks.has(k)) continue;
+      if (h.length === lens.get(k)) done.push(h);
+      seen.delete(k);
+      lens.delete(k);
+    }
+  }
+  check(done.length >= 30, `слишком мало завершённых разговоров за день: ${done.length}`);
+  let bad = 0;
+  let replies = 0;
+  let total = 0;
+  let unresolved = 0;
+  const topics = new Set<string>();
+  for (const h of done) {
+    if (h.length < 3 || h.length > 6) bad++;
+    if (h[0].topic !== 'greet') bad++;
+    const last = h[h.length - 1].topic;
+    if (last !== 'bye' && last !== 'quarrel' && last !== 'makeup') bad++;
+    for (const l of h) {
+      total++;
+      if (l.reply) replies++;
+      if (l.text.includes('{') || l.text.includes('}')) unresolved++;
+      if (l.topic) topics.add(l.topic);
+    }
+  }
+  check(bad === 0, `разговоров с нарушенной структурой (3–6 реплик, приветствие → … → прощание): ${bad} из ${done.length}`);
+  check(replies / Math.max(1, total) >= 0.15, `слишком мало осмысленных ответов: ${replies} из ${total} реплик`);
+  check(unresolved === 0, `реплик с неподставленными шаблонами: ${unresolved}`);
+  check(topics.size >= 8, `слишком мало разных тем за день: ${[...topics].join(', ')}`);
+  console.log(`  разговоров: ${done.length}, реплик ${total}, ответов ${replies}, тем ${topics.size}: ${[...topics].join(', ')}`);
+  for (const h of done.slice(0, 2)) for (const l of h) console.log(`    ${l.who}: ${l.text}`);
+  // Раскладка облачков: без перекрытий, закреплённые всегда видны, препятствия не перекрываются
+  const rng = new RNG(7);
+  let overlapFails = 0;
+  let pinFails = 0;
+  let obstFails = 0;
+  for (let iter = 0; iter < 200; iter++) {
+    const items: BubbleItem[] = [];
+    const cnt = 5 + rng.int(0, 40);
+    for (let i = 0; i < cnt; i++) items.push({ id: i, ax: rng.int(0, 1280), ay: rng.int(0, 720), w: 60 + rng.int(0, 160), h: 18 + rng.int(0, 3) * 15, priority: rng.int(0, 100), pinned: i < 3 });
+    const obstacles = [{ x: 900, y: 60, w: 360, h: 300 }, { x: 0, y: 0, w: 1280, h: 44 }];
+    const placed = layoutBubbles(items, { viewW: 1280, viewH: 720, top: 44, bottom: 48, left: 52, right: 8, limit: 6 + rng.int(0, 8), obstacles });
+    for (let i = 0; i < placed.length; i++)
+      for (let j = i + 1; j < placed.length; j++) {
+        const a = placed[i];
+        const b = placed[j];
+        if (a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y && !(a.pinned && b.pinned)) overlapFails++;
+      }
+    for (const p of placed) {
+      if (p.pinned) continue;
+      for (const o of obstacles) if (p.x < o.x + o.w && p.x + p.w > o.x && p.y < o.y + o.h && p.y + p.h > o.y) obstFails++;
+    }
+    for (let i = 0; i < 3; i++) if (!placed.some((p) => p.id === i)) pinFails++;
+  }
+  check(overlapFails === 0, `перекрывающихся облачков: ${overlapFails}`);
+  check(obstFails === 0, `облачков поверх окон: ${obstFails}`);
+  check(pinFails === 0, `закреплённые облачка пропали: ${pinFails}`);
+  console.log('  раскладка облачков: 200 случайных сцен без перекрытий');
 }
 
 if (warnings) console.log(`\nПредупреждений: ${warnings} (мягкие инварианты, станут строгими в фазе 12)`);

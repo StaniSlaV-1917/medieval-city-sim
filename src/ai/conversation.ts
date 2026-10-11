@@ -19,6 +19,10 @@ export interface Talk {
   quarrel: boolean;
   speaker: number; // кто говорит следующим
   forced: number;
+  /** Произнесённые реплики (для субтитров) */
+  history?: { who: number; text: string; topic?: string; reply?: boolean }[];
+  /** Ссора закончилась примирением */
+  madeUp?: boolean;
 }
 
 setStartTalk((sim, a, b) => startTalk(sim, a, b));
@@ -58,13 +62,23 @@ export function updateConversations(sim: Simulation): void {
         if (isChild(sp) || isChild(li)) p *= 0.2;
         if (sim.rng.chance(p)) {
           t.quarrel = true;
-          t.lines = Math.min(t.lines + 2, t.index + 4);
+          t.lines = Math.min(6, Math.min(t.lines + 2, t.index + 4));
         }
       }
       let topic = pickTopic(ctx, t.prevTopic, t.index, t.lines, t.quarrel);
       if (t.forced === 3 && t.index > 0 && t.index < t.lines - 1) topic = 'flirt';
+      // ссора иногда кончается примирением
+      if (t.quarrel && t.index === t.lines - 1 && t.forced !== 2 && (hasTrait(sp, Trait.Kind) || relation(sp, li.id) > 30) && sim.rng.chance(0.5)) {
+        topic = 'makeup';
+        t.quarrel = false;
+        t.madeUp = true;
+      }
       const line = makeLine(ctx, topic, t.lastLine);
-      say(sp, line.text, 45, false, tick);
+      const spacing = 30 + Math.round(line.text.length * 0.55) + sim.rng.int(0, 15);
+      say(sp, line.text, spacing + 12, false, tick, line.emo);
+      if (!t.history) t.history = [];
+      t.history.push({ who: sp.id, text: line.text, topic: line.topic, reply: line.reply });
+      if (t.history.length > 8) t.history.shift();
       // слух передан
       if (line.rumor && !isChild(li)) {
         const known = li.memories.some((m) => m.about === line.rumor!.about && m.topic === line.rumor!.topic);
@@ -79,7 +93,7 @@ export function updateConversations(sim: Simulation): void {
       t.prevTopic = line.topic;
       t.index++;
       t.speaker = t.speaker === t.a ? t.b : t.a;
-      t.nextLine = tick + 30 + Math.round(line.text.length * 0.5) + sim.rng.int(0, 15);
+      t.nextLine = tick + spacing;
     }
   }
   // Новые встречи: раз в 10 тиков часть жителей
@@ -147,10 +161,13 @@ export function startTalk(sim: Simulation, a: Citizen, b: Citizen): boolean {
     a.dir = dy > 0 ? 0 : 3;
     b.dir = dy > 0 ? 3 : 0;
   }
-  let lines = 3 + sim.rng.int(0, 2);
-  if (hasTrait(a, Trait.Talkative) || hasTrait(b, Trait.Talkative)) lines += 2;
+  // 3–6 реплик: приветствие, тема, ответ, … , прощание
+  let lines = 4 + sim.rng.int(0, 1);
+  if (hasTrait(a, Trait.Talkative) || hasTrait(b, Trait.Talkative)) lines += 1;
   if (relation(a, b.id) > 40) lines += 1;
-  if (hasTrait(a, Trait.Gloomy) && hasTrait(b, Trait.Gloomy)) lines = 2;
+  if (hasTrait(a, Trait.Gloomy) && hasTrait(b, Trait.Gloomy)) lines = 3;
+  if (a.action === 'work' || b.action === 'work') lines = Math.min(lines, 4);
+  lines = Math.min(6, lines);
   let quarrel = false;
   const rel = relation(a, b.id);
   let forced = 0;
@@ -162,7 +179,7 @@ export function startTalk(sim: Simulation, a: Citizen, b: Citizen): boolean {
   }
   if (rel < -30 && sim.rng.chance(0.4)) quarrel = true;
   if (hasTrait(a, Trait.HotTempered) && a.drunk > 40 && sim.rng.chance(0.3)) quarrel = true;
-  sim.talks.set(a.id, { a: a.id, b: b.id, lines, index: 0, nextLine: sim.tick + 3, lastLine: null, prevTopic: null, quarrel, speaker: a.id, forced });
+  sim.talks.set(a.id, { a: a.id, b: b.id, lines, index: 0, nextLine: sim.tick + 3, lastLine: null, prevTopic: null, quarrel, speaker: a.id, forced, history: [] });
   return true;
 }
 
@@ -178,6 +195,14 @@ function endTalk(sim: Simulation, t: Talk, completed: boolean): void {
     c.action = c.action === 'talk' ? '' : c.action;
   }
   if (!completed) return;
+  if (t.madeUp) {
+    changeRelation(a, b.id, 1);
+    changeRelation(b, a.id, 1);
+    a.needs.social = Math.min(100, a.needs.social + 10);
+    b.needs.social = Math.min(100, b.needs.social + 10);
+    if (sim.rng.chance(0.3)) remember(a, tick, `Чуть не поссорился${a.sex === 'f' ? 'ась' : 'ся'} с ${fullName(b)}, но помирились.`, 0.3, b.id);
+    return;
+  }
   if (t.quarrel) {
     const d = -(8 + sim.rng.int(0, 10));
     changeRelation(a, b.id, d);
