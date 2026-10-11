@@ -1,5 +1,5 @@
 import type { Game } from '../main';
-import { GOODS, GOOD_INFO } from '../economy/goods';
+import { GOODS, GOOD_INFO, CORE_GOODS, CATEGORY_NAMES } from '../economy/goods';
 import type { Win } from './windows';
 
 export class MarketPanel {
@@ -39,7 +39,13 @@ export class MarketPanel {
   private render(): void {
     const sim = this.game.sim;
     const m = sim.market;
-    const rows = GOODS.map((g) => {
+    const CAT_ORDER = ['food', 'raw', 'material', 'goods', 'luxury'] as const;
+    const shown = GOODS.filter((g) => CORE_GOODS.includes(g) || m.stock[g] >= 1 || (m.soldYesterday[g] ?? 0) > 0).sort((a, b) => CAT_ORDER.indexOf(GOOD_INFO[a].category) - CAT_ORDER.indexOf(GOOD_INFO[b].category));
+    let lastCat = '';
+    const rows = shown.map((g) => {
+      const cat = GOOD_INFO[g].category;
+      const head = cat !== lastCat ? `<tr><th colspan="4" class="cat">${CATEGORY_NAMES[cat]}</th></tr>` : '';
+      lastCat = cat;
       const p = m.prices[g];
       const base = GOOD_INFO[g].base;
       const k = p / base;
@@ -47,7 +53,7 @@ export class MarketPanel {
       const arrow = k > 1.3 ? '▲' : k < 0.85 ? '▼' : '·';
       const d = m.stock[g] - m.dayStartStock[g];
       const dTxt = Math.abs(d) >= 0.5 ? `<span class="${d > 0 ? 'good' : 'bad'}">${d > 0 ? '+' : ''}${Math.round(d)}</span>` : '·';
-      return `<tr><td>${GOOD_INFO[g].name}</td><td class="${cls}">${p.toFixed(1)} ${arrow}</td><td>${Math.round(m.stock[g])} ${dTxt}</td><td>${Math.round(m.soldYesterday[g])}</td></tr>`;
+      return `${head}<tr><td>${GOOD_INFO[g].name}</td><td class="${cls}">${p.toFixed(1)} ${arrow}</td><td>${Math.round(m.stock[g])} ${dTxt}</td><td>${Math.round(m.soldYesterday[g])}</td></tr>`;
     }).join('');
     const taxPct = Math.round(sim.taxRate * 100);
     this.el.innerHTML = `

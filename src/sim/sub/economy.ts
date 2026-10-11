@@ -5,6 +5,7 @@ import { collectTaxes } from '../../economy/taxes';
 import { dailyTrade } from '../../economy/trade';
 import type { Good } from '../../economy/goods';
 import { TICKS_PER_HOUR, TICKS_PER_DAY } from '../../core/time';
+import { updateLogisticsDaily } from '../../economy/logistics';
 
 export interface Caravan {
   members: number[];
@@ -31,5 +32,6 @@ export class Economy {
     if (t % TICKS_PER_DAY === 0) this.market.newDay(sim);
     if (t % TICKS_PER_DAY === 6 * TICKS_PER_HOUR) collectTaxes(sim);
     if (t % TICKS_PER_DAY === 20 * TICKS_PER_HOUR) dailyTrade(sim);
+    if (t % TICKS_PER_HOUR === 0) updateLogisticsDaily(sim, t % TICKS_PER_DAY);
   }
 }

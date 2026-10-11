@@ -19,10 +19,14 @@ import { Tile } from '../src/world/tiles';
 import { catalogItem } from '../src/data/buildCatalog';
 import { checkPlace, placeBuilding, buildRoad, snappedLine, paintZone, placePlot, demolishBuilding, upgradeBuilding, hireWorker, fireWorker, setMaxWorkers, setClosed, farmFertility, doorFor, materialAvailable } from '../src/sim/build';
 import { BuildingType } from '../src/world/buildings';
-import { idx as tileIndex, isRoadTile } from '../src/world/world';
+import { idx as tileIndex, isRoadTile, isWaterTile } from '../src/world/world';
 import { dialogueLineCount } from '../src/ai/dialogue';
 import { layoutBubbles, BubbleItem } from '../src/render/bubbleLayout';
 import { RNG } from '../src/core/rng';
+import { GOODS, GOOD_INFO, Good } from '../src/economy/goods';
+import { storeCapacity, fuelDays } from '../src/economy/logistics';
+import { TICKS_PER_DAY as TPD, DAYS_PER_SEASON, Season } from '../src/core/time';
+import type { Simulation as SimT } from '../src/sim/game';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -53,6 +57,46 @@ function warn(cond: boolean, msg: string): void {
   if (!cond) {
     warnings++;
     console.warn('  ⚠ ' + msg);
+  }
+}
+
+/** Сумма товара во всех зданиях и у живых жителей (фаза 15: баланс ресурсов) */
+function goodsTotal(sim: SimT): Record<Good, number> {
+  const t = Object.fromEntries(GOODS.map((g) => [g, 0])) as Record<Good, number>;
+  for (const b of sim.world.buildings) for (const g of GOODS) t[g] += b.storage[g] ?? 0;
+  for (const c of sim.citizens) if (c.alive) for (const g of GOODS) t[g] += c.inventory[g] ?? 0;
+  return t;
+}
+type LedgerSnap = Record<string, { produced: number; consumed: number; spoiled: number; sold: number; bought: number }>;
+function ledgerSnap(sim: SimT): LedgerSnap {
+  return JSON.parse(JSON.stringify(sim.market.ledger)) as LedgerSnap;
+}
+/** Инвариант ROADMAP (фаза 15): произведено + куплено = потреблено + испортилось + продано + Δ запасов — для каждого товара */
+function ledgerCheck(sim: SimT, t0: Record<Good, number>, l0: LedgerSnap, label: string): number {
+  let bad = 0;
+  const t1 = goodsTotal(sim);
+  for (const g of GOODS) {
+    const l = sim.market.ledger[g];
+    const a = l0[g] ?? { produced: 0, consumed: 0, spoiled: 0, sold: 0, bought: 0 };
+    const expected = l.produced - a.produced + (l.bought - a.bought) - (l.consumed - a.consumed) - (l.spoiled - a.spoiled) - (l.sold - a.sold);
+    const actual = t1[g] - t0[g];
+    const volume = l.produced - a.produced + (l.consumed - a.consumed);
+    check(Number.isFinite(t1[g]) && t1[g] >= -0.01, `${label}: запас ${g} = ${t1[g]}`);
+    if (Math.abs(actual - expected) > 0.5 + volume * 0.001) {
+      bad++;
+      check(false, `${label}: баланс ${GOOD_INFO[g].name}: Δзапаса ${actual.toFixed(1)}, по книге ${expected.toFixed(1)} (произведено ${(l.produced - a.produced).toFixed(1)}, потреблено ${(l.consumed - a.consumed).toFixed(1)}, испортилось ${(l.spoiled - a.spoiled).toFixed(1)}, продано ${(l.sold - a.sold).toFixed(1)}, куплено ${(l.bought - a.bought).toFixed(1)})`);
+    }
+  }
+  return bad;
+}
+/** Хранилища (амбар, дровяной сарай, погреб) не переполнены */
+function storageCheck(sim: SimT, label: string): void {
+  for (const b of sim.world.buildings) {
+    if (b.w <= 0) continue;
+    if (b.type !== BuildingType.Granary && b.type !== BuildingType.Woodshed && b.type !== BuildingType.Cellar) continue;
+    let s = 0;
+    for (const g of GOODS) s += Math.max(0, b.storage[g] ?? 0);
+    check(s <= storeCapacity(b) * 1.1 + 1, `${label}: ${BUILDING_DEFS[b.type].name} ${b.id} переполнен: ${s.toFixed(0)} / ${storeCapacity(b)}`);
   }
 }
 
@@ -93,6 +137,9 @@ for (const c of cases) {
   if (sim.citizens.length === 0) console.log('  (население появится в фазе 1)');
   else check(pop0 > 50, `слишком маленькое население: ${pop0}`);
 
+  // Баланс ресурсов (фаза 15): снимок запасов и книги учёта перед прогоном
+  const goods0 = goodsTotal(sim);
+  const ledger0 = ledgerSnap(sim);
   // Прогон
   const stuck = new Map<number, number>();
   const totalTicks = c.days * TICKS_PER_DAY;
@@ -141,6 +188,19 @@ for (const c of cases) {
   check(st.avgHunger >= 40, `город голодает: средняя сытость ${st.avgHunger.toFixed(0)}`);
   check(st.avgHealth >= 70, `город болеет: среднее здоровье ${st.avgHealth.toFixed(0)}`);
   for (const b of world.buildings) for (const [k, v] of Object.entries(b.storage)) check(Number.isFinite(v) && v >= -0.01, `запас ${k} в здании ${b.id} = ${v}`);
+  for (const cz of sim.citizens) for (const [k, v] of Object.entries(cz.inventory)) check(Number.isFinite(v) && v >= -0.01, `инвентарь ${k} у жителя ${cz.id} = ${v}`);
+  // Баланс ресурсов и хранилища (фаза 15)
+  {
+    const bad = ledgerCheck(sim, goods0, ledger0, 'книга учёта');
+    storageCheck(sim, 'хранилища');
+    const lb = sim.market.ledger.bread;
+    if (c.days >= 2) check(lb.spoiled - (ledger0.bread?.spoiled ?? 0) > 0, 'хлеб не портится — порча не работает');
+    const produced = GOODS.filter((g) => sim.market.ledger[g].produced - (ledger0[g]?.produced ?? 0) > 0).length;
+    check(produced >= 13, `производится слишком мало видов товаров: ${produced}`);
+    const fw = sim.market.ledger.firewood;
+    check(fw.produced - (ledger0.firewood?.produced ?? 0) > 0, 'дрова не заготавливаются');
+    console.log(`  товары: видов в производстве ${produced}, расхождений книги ${bad}, порча хлеба ${(lb.spoiled - (ledger0.bread?.spoiled ?? 0)).toFixed(0)}, дров на ${fuelDays(sim).toFixed(1)} дн.`);
+  }
   // Природа (фаза 13): ресурсы не уходят в минус, лес не исчезает, пни от вырубки появляются
   let negRes = 0;
   let forestNow = 0;
@@ -150,7 +210,7 @@ for (const c of cases) {
   }
   check(negRes === 0, `тайлов с отрицательным ресурсом/NaN плодородием: ${negRes}`);
   check(forestNow >= forest0 * 0.9, `лес исчезает: было ${forest0} тайлов, стало ${forestNow}`);
-  const stumps = world.props.filter((p) => p.type === PropType.Stump && p.born !== undefined).length;
+  const stumps = world.props.filter((p) => (p.type === PropType.Stump || p.type === PropType.Bush) && p.born !== undefined).length;
   if (c.days >= 3) check(stumps > 0, 'лесорубы работали, а пней от вырубки нет');
   check(world.parcels.length >= 8 && new Set(world.parcels.map((p) => p.name)).size === world.parcels.length, 'угодья: мало или имена повторяются');
   const game = sim.animals.filter((a) => a.alive && (a.kind === 5 || a.kind === 6)).length;
@@ -328,6 +388,111 @@ for (const c of cases) {
   check(sim.citizens.every((c) => !c.alive || (Number.isFinite(c.x) && Number.isFinite(c.y))), 'NaN после стройки');
   check(isRoadTile(world.tiles[tileIndex(world, gx + 5, gy + 2)] as Tile) || nPath === 0, 'тропа не стала дорогой');
 
+}
+
+// ---------------------------------------------------------------- Ресурсы, склады, логистика (фаза 15)
+{
+  console.log('\n=== Логистика: носильщики, зима и отопление, порча, износ, новые промыслы ===');
+  // 1. Носильщики свозят продукцию в амбар; рыбаки/охотники/лесорубы добывают
+  const sim = new Simulation({ seedText: 'Вальдмарк', size: 'medium' });
+  const world = sim.world;
+  const granary = world.buildings.find((b) => b.type === BuildingType.Granary);
+  const fisher = world.buildings.find((b) => b.type === BuildingType.Fisher);
+  const hunter = world.buildings.find((b) => b.type === BuildingType.Hunter);
+  const woodcutter = world.buildings.find((b) => b.type === BuildingType.Woodcutter);
+  const woodshed = world.buildings.find((b) => b.type === BuildingType.Woodshed);
+  check(!!granary && !!fisher && !!hunter && !!woodcutter && !!woodshed, 'в сгенерированном городе нет амбара/рыбака/охотника/лесоруба/дровяного сарая');
+  const porters = sim.citizens.filter((c) => c.alive && c.profession === Profession.Porter).length;
+  check(porters >= 1, `нет носильщиков: ${porters}`);
+  const granaryFood0 = granary ? (granary.storage.bread ?? 0) + (granary.storage.fish ?? 0) + (granary.storage.meat ?? 0) : 0;
+  const game0 = sim.animals.filter((a) => a.alive && (a.kind === 5 || a.kind === 6)).length;
+  const g0 = goodsTotal(sim);
+  const l0 = ledgerSnap(sim);
+  for (let t = 0; t < TPD * 3; t++) sim.step();
+  const led = sim.market.ledger;
+  check(led.fish.produced > 0, 'рыбацкая хижина ничего не наловила');
+  check(led.meat.produced - l0.meat.produced > 0 && hunter!.storage.revenue !== undefined || led.hide.produced - l0.hide.produced > 0, 'охотник ничего не добыл');
+  check(led.firewood.produced > 0 && led.wood.produced - l0.wood.produced > 0, 'лесоруб не заготовил дров/брёвен');
+  const granaryFood1 = granary ? (granary.storage.bread ?? 0) + (granary.storage.fish ?? 0) + (granary.storage.meat ?? 0) : 0;
+  check(granaryFood1 > granaryFood0, `носильщики ничего не принесли в амбар: было ${granaryFood0.toFixed(0)}, стало ${granaryFood1.toFixed(0)}`);
+  const carried = sim.citizens.filter((c) => c.alive && c.profession === Profession.Porter && c.actionData.hauling).length;
+  const lostCargo = sim.citizens.filter((c) => c.alive && c.profession === Profession.Porter && c.action !== 'porter' && GOODS.some((g) => (c.inventory[g] ?? 0) >= 8)).length;
+  check(lostCargo === 0, `носильщики бросили работу с грузом в руках: ${lostCargo}`);
+  ledgerCheck(sim, g0, l0, 'логистика');
+  storageCheck(sim, 'логистика');
+  const game1 = sim.animals.filter((a) => a.alive && (a.kind === 5 || a.kind === 6)).length;
+  console.log(`  носильщиков ${porters} (с грузом сейчас ${carried}), амбар: еды ${granaryFood0.toFixed(0)} → ${granaryFood1.toFixed(0)}; рыбы ${led.fish.produced.toFixed(1)}, дров ${led.firewood.produced.toFixed(1)}, мяса ${(led.meat.produced - l0.meat.produced).toFixed(1)}; дичь ${game0} → ${game1}`);
+
+  // 2. Зима: дома жгут дрова, запас в днях считается, город не вымерзает при полном сарае
+  const w = new Simulation({ seedText: 'зима', size: 'small' });
+  w.tick = TPD * DAYS_PER_SEASON * Season.Winter + TICKS_PER_HOUR * 6;
+  const shed = w.world.buildings.find((b) => b.type === BuildingType.Woodshed);
+  if (shed) shed.storage.firewood = (shed.storage.firewood ?? 0) + 300;
+  const fuel0 = goodsTotal(w).firewood + goodsTotal(w).peat;
+  const pop0 = w.citizens.filter((c) => c.alive).length;
+  const wl0 = ledgerSnap(w);
+  const wg0 = goodsTotal(w);
+  for (let t = 0; t < TPD * 3; t++) w.step();
+  check(w.season === Season.Winter, 'сезон не зимний');
+  const burned = w.market.ledger.firewood.consumed - wl0.firewood.consumed + (w.market.ledger.peat.consumed - wl0.peat.consumed);
+  check(burned > 0, 'зимой дома не топят');
+  const fuel1 = goodsTotal(w).firewood + goodsTotal(w).peat;
+  const fd = fuelDays(w);
+  check(Number.isFinite(fd) && fd >= 0, `запас дров в днях: ${fd}`);
+  const pop1 = w.citizens.filter((c) => c.alive).length;
+  check(pop1 >= pop0 * 0.97, `зимой вымерло слишком много: ${pop0} → ${pop1}`);
+  check(Number.isFinite(w.city.coldHomes) && w.city.coldHomes >= 0, 'счётчик холодных домов сломан');
+  const bought = w.citizens.filter((c) => c.alive && c.action === 'buy_fuel').length;
+  ledgerCheck(w, wg0, wl0, 'зима');
+  console.log(`  зима: сожжено ${burned.toFixed(0)} топлива, запас ${fuel0.toFixed(0)} → ${fuel1.toFixed(0)} (${fd.toFixed(1)} дн.), холодных домов ${w.city.coldHomes}, покупают дрова сейчас ${bought}, население ${pop0} → ${pop1}`);
+
+  // 3. Износ и ремонт: ветхие здания чинятся материалами со склада за счёт казны
+  const r = new Simulation({ seedText: 'ветхость', size: 'medium' });
+  const wh = r.world.buildings.find((b) => b.type === BuildingType.Warehouse) ?? r.world.buildings.find((b) => b.type === BuildingType.Sawmill)!;
+  wh.storage.planks = (wh.storage.planks ?? 0) + 100;
+  wh.storage.stone = (wh.storage.stone ?? 0) + 100;
+  r.treasury += 500;
+  const houses = r.world.buildings.filter((b) => b.w > 0 && BUILDING_DEFS[b.type].home && b.underConstruction === undefined);
+  for (const h of houses.slice(0, 6)) h.condition = 0.42;
+  const rm0 = r.totalMoney();
+  const rl0 = ledgerSnap(r);
+  const rg0 = goodsTotal(r);
+  for (let t = 0; t < TPD * 2; t++) r.step();
+  const repaired = houses.slice(0, 6).filter((h) => h.condition > 0.6).length;
+  check(repaired >= 2, `ремонт не идёт: починено ${repaired} из 6`);
+  const decayed = r.world.buildings.filter((b) => b.w > 0 && b.condition < 1 && b.underConstruction === undefined).length;
+  check(decayed > 0, 'здания не ветшают');
+  check(Math.abs(r.totalMoney() - (rm0 + r.moneyCreated - r.moneyDestroyed)) < 0.5, 'ремонт ломает баланс денег');
+  ledgerCheck(r, rg0, rl0, 'износ');
+  console.log(`  износ: починено ${repaired}/6, ветшающих зданий ${decayed}, изношенных по счётчику ${r.city.wornBuildings}`);
+
+  // 4. Новые промыслы из каталога: рыбацкая хижина ставится только у воды, охотничья изба — у леса
+  const p = new Simulation({ seedText: 'промыслы', size: 'small' });
+  p.treasury += 2000;
+  const pw = p.world;
+  const fishItem = catalogItem('fisher')!;
+  const huntItem = catalogItem('hunter')!;
+  check(!!fishItem && !!huntItem, 'в каталоге нет рыбака/охотника');
+  let okWater = 0;
+  let okDry = 0;
+  let placedFisher = -1;
+  for (let y = 4; y < pw.h - 6; y += 2)
+    for (let x = 4; x < pw.w - 6; x += 2) {
+      const res = checkPlace(p, fishItem, x, y, 0);
+      if (!res.ok) continue;
+      let water = false;
+      const rr = (fishItem.nearR ?? 6) + 4;
+      for (let dy = -rr; dy <= rr && !water; dy++) for (let dx = -rr; dx <= rr; dx++) { const tt = pw.tiles[tileIndex(pw, Math.max(0, Math.min(pw.w - 1, x + dx)), Math.max(0, Math.min(pw.h - 1, y + dy)))] as Tile; if (isWaterTile(tt)) water = true; }
+      if (water) okWater++; else okDry++;
+      if (placedFisher < 0 && water) {
+        const pb = placeBuilding(p, fishItem, x, y, 0);
+        if (pb) placedFisher = pb.id;
+      }
+    }
+  check(okWater > 0, 'рыбацкую хижину негде поставить у воды');
+  check(okDry === 0, `рыбацкую хижину можно поставить вдали от воды: ${okDry} мест`);
+  check(placedFisher >= 0, 'рыбацкая хижина не поставлена');
+  console.log(`  каталог: мест для рыбака у воды ${okWater}, вдали от воды ${okDry}; хижина #${placedFisher}`);
 }
 
 // ---------------------------------------------------------------- Сохранения

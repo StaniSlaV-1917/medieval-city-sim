@@ -8,6 +8,7 @@ import { GOOD_INFO, type Good } from '../economy/goods';
 import { plural } from '../core/math';
 import { Profession } from '../sim/citizen';
 import { CITY_FOUNDED_YEAR } from '../core/time';
+import { fuelDays } from '../economy/logistics';
 
 interface ResDef {
   id: string;
@@ -30,6 +31,7 @@ const RES: ResDef[] = [
   { id: 'stone', icon: 'stone', label: 'Камень', good: 'stone' },
   { id: 'tools', icon: 'tools', label: 'Инструменты', good: 'tools' },
   { id: 'goods', icon: 'goods', label: 'Изделия', good: 'goods' },
+  { id: 'firewood', icon: 'wood', label: 'Дрова', good: 'firewood' },
   { id: 'mood', icon: 'mood', label: 'Счастье' },
   { id: 'unrest', icon: 'unrest', label: 'Недовольство' },
 ];
@@ -194,6 +196,13 @@ export class TopBar {
     for (const r of RES) {
       if (!r.good) continue;
       const g = r.good;
+      if (g === 'firewood') {
+        const days = fuelDays(sim);
+        const winter = sim.season === 3 || sim.season === 2;
+        const tip = `${this.flowsTip('firewood')}<div class="hdr">Зима</div><div>Запаса топлива (дрова и торф) хватит примерно на <b>${days.toFixed(1)} дн.</b> морозов</div><div>Домов без топлива вчера: ${sim.city.coldHomes}</div><div class="muted small">Дома жгут 0,5–2 единицы в день по холоду; без дров жильцы болеют, бездомные мёрзнут</div>`;
+        this.set('firewood', `${Math.round(m.stock.firewood + m.stock.peat)} · ${days.toFixed(0)}д`, m.stock.firewood - m.dayStartStock.firewood, tip, winter ? days < 6 : days < 3);
+        continue;
+      }
       this.set(r.id, String(Math.round(m.stock[g])), m.stock[g] - m.dayStartStock[g], this.flowsTip(g), g === 'bread' && m.stock[g] < st.population * 0.3);
     }
     // Счастье и недовольство
@@ -226,6 +235,8 @@ export class TopBar {
     }
     if (st.avgHunger < 45) out.push({ id: 'hunger', icon: 'bread', text: 'Голод', tip: `<b>Город голодает</b><br>Средняя сытость ${Math.round(st.avgHunger)}. Проверьте запасы зерна и работу пекарен`, x: sim.world.poi.cx, y: sim.world.poi.cy, severity: st.avgHunger < 30 ? 2 : 1, window: 'economy' });
     else if (sim.market.stock.bread < st.population * 0.2 && sim.market.stock.grain < st.population * 0.5) out.push({ id: 'bread', icon: 'bread', text: 'Мало хлеба', tip: '<b>Запасы хлеба и зерна на исходе</b><br>Цены вырастут, бедняки начнут голодать', x: sim.world.poi.cx, y: sim.world.poi.cy, severity: 1, window: 'economy' });
+    if (sim.city.coldHomes >= 3) out.push({ id: 'cold', icon: 'wood', text: `Мёрзнут ×${sim.city.coldHomes}`, tip: `<b>${sim.city.coldHomes} домов без топлива</b><br>Постройте дровяной сарай и избу лесоруба, запасите дрова на зиму`, x: -1, y: -1, severity: sim.city.coldHomes >= 8 ? 2 : 1, window: 'economy' });
+    if (sim.city.wornBuildings >= 4) out.push({ id: 'worn', icon: 'build', text: `Ветхих ×${sim.city.wornBuildings}`, tip: '<b>Здания требуют ремонта</b><br>Ремонт идёт сам за счёт казны, если на складах есть доски и камень', x: -1, y: -1, severity: 1, window: 'development' });
     if (st.homeless > Math.max(2, st.population * 0.08)) out.push({ id: 'homeless', icon: 'population', text: `Бездомных ${st.homeless}`, tip: '<b>Нехватка жилья</b><br>Город сам строит дома, когда есть доски и казна', x: -1, y: -1, severity: 1, window: 'development' });
     if (sim.treasury < 30) out.push({ id: 'treasury', icon: 'money', text: 'Казна пуста', tip: '<b>Казна почти пуста</b><br>Нечем платить страже и раздавать милостыню', x: -1, y: -1, severity: 1, window: 'edicts' });
     if (sim.unrest > 60) out.push({ id: 'unrest', icon: 'unrest', text: `Недовольство ${Math.round(sim.unrest)}`, tip: '<b>Народ ропщет</b><br>При высоком недовольстве собираются протесты и бунты', x: sim.world.poi.cx, y: sim.world.poi.cy, severity: sim.unrest > 80 ? 2 : 1, window: 'edicts' });

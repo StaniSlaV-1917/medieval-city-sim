@@ -180,6 +180,14 @@ const firefight: ActionDef = {
       c.action = '';
       return actFor(ctx, 20);
     }
+    if (c.needs.hunger < 6 || c.needs.energy < 4) {
+      // валится с ног — уходит поесть/поспать, остальные тушат дальше
+      c.speed = 1;
+      c.action = '';
+      c.inventory['water'] = 0;
+      think(c, c.needs.hunger < 6 ? 'Сил нет — надо хоть корку съесть.' : 'Ноги не держат.');
+      return actFor(ctx, 5);
+    }
     if (c.actionData.phase === 0) {
       c.actionData.phase = 1;
       c.inventory['water'] = 1;

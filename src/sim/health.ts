@@ -1,5 +1,6 @@
 // Здоровье: болезни и эпидемии, обмороки, монахи-лекари, больница, смерть и похороны.
 import type { Simulation } from './game';
+import { isGood } from '../economy/goods';
 import { Citizen, CitizenState, Profession, Trait, hasTrait, isChild, isElder, fullName, nameAcc, FLAG_SICK, FLAG_INJURED, changeRelation } from './citizen';
 import { ACTIONS, ActionDef, actFor, goTo, enterBuilding, say, think, remember } from '../ai/actions';
 import { makeCtx, interrupt } from '../ai/brain';
@@ -315,6 +316,8 @@ export function die(sim: Simulation, c: Citizen, cause: string): void {
   c.order = null;
   const tick = sim.tick;
   sim.deaths++;
+  for (const [k, v] of Object.entries(c.inventory)) if (v > 0 && isGood(k)) sim.market.flow(k, 'пропало с умершим', -v, 'spoiled');
+  c.inventory = {};
   sim.events.emit('citizen:died', { id: c.id, cause });
   sim.chronicle.log(tick, EventKind.Death, `${fullName(c)} умер${c.sex === 'f' ? 'ла' : ''} ${cause} в возрасте ${c.age} лет.`, Math.round(c.x), Math.round(c.y), [c.id], 0.9);
   // семья

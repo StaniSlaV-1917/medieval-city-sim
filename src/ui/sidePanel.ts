@@ -10,6 +10,7 @@ import { FIRE_LABELS } from '../sim/fire';
 import { EVENT_LABELS } from '../sim/cityEvents';
 import { BUILD_LABELS } from '../sim/construction';
 import { PROSPECT_LABELS } from '../sim/prospect';
+import { LOGISTICS_LABELS, storeCapacity, storedTotal } from '../economy/logistics';
 import { hireWorker, fireWorker, setMaxWorkers, setClosed, demolishBuilding, upgradeBuilding, upgradePlan, setPaused, setUrgent, materialsLeft } from '../sim/build';
 import { STAGE_NAMES } from '../sim/construction';
 import { costText } from '../data/buildCatalog';
@@ -129,7 +130,7 @@ export class SidePanel {
   }
 
   citizenTooltip(c: Citizen): string {
-    const act = c.state === 3 ? 'беседует' : (ACTION_LABELS[c.action] ?? CRIME_LABELS[c.action] ?? HEALTH_LABELS[c.action] ?? FIRE_LABELS[c.action] ?? EVENT_LABELS[c.action] ?? BUILD_LABELS[c.action] ?? PROSPECT_LABELS[c.action] ?? '');
+    const act = c.state === 3 ? 'беседует' : (ACTION_LABELS[c.action] ?? CRIME_LABELS[c.action] ?? HEALTH_LABELS[c.action] ?? FIRE_LABELS[c.action] ?? EVENT_LABELS[c.action] ?? BUILD_LABELS[c.action] ?? PROSPECT_LABELS[c.action] ?? LOGISTICS_LABELS[c.action] ?? '');
     return `<b>${fullName(c)}</b>, ${c.age} · ${professionName(c)}<br>${act} · ${moodWord(c.mood)}<br><i>${c.thought || ''}</i>`;
   }
 
@@ -200,7 +201,7 @@ export class SidePanel {
     const portrait = this.portrait(c);
     const following = this.game.renderer.camera.follow ? 'Не следовать' : 'Следовать (F)';
     const isFav = sim.favorites.includes(c.id);
-    const status = `${professionName(c)}, ${c.age} ${ageWord(c.age)} · ${c.state === 3 ? 'беседует' : (ACTION_LABELS[c.action] ?? CRIME_LABELS[c.action] ?? HEALTH_LABELS[c.action] ?? FIRE_LABELS[c.action] ?? EVENT_LABELS[c.action] ?? BUILD_LABELS[c.action] ?? PROSPECT_LABELS[c.action] ?? '')} · ${moodWord(c.mood)}${c.jailedUntil > this.game.sim.tick ? ' · в тюрьме' : ''}${c.flags & 2 ? ' · в розыске' : ''}${c.flags & 8 ? ' · ранен' : ''}${c.flags & 4 ? ' · болен' : ''}`;
+    const status = `${professionName(c)}, ${c.age} ${ageWord(c.age)} · ${c.state === 3 ? 'беседует' : (ACTION_LABELS[c.action] ?? CRIME_LABELS[c.action] ?? HEALTH_LABELS[c.action] ?? FIRE_LABELS[c.action] ?? EVENT_LABELS[c.action] ?? BUILD_LABELS[c.action] ?? PROSPECT_LABELS[c.action] ?? LOGISTICS_LABELS[c.action] ?? '')} · ${moodWord(c.mood)}${c.jailedUntil > this.game.sim.tick ? ' · в тюрьме' : ''}${c.flags & 2 ? ' · в розыске' : ''}${c.flags & 8 ? ' · ранен' : ''}${c.flags & 4 ? ' · болен' : ''}`;
     this.win.setTitle(fullName(c));
     const tabs = TABS.map(([k, l]) => `<button class="tab ${this.tab === k ? 'active' : ''}" data-tab="${k}">${l}</button>`).join('');
     let body = '';
@@ -471,7 +472,7 @@ export class SidePanel {
       ${def.home ? `<div class="section"><h3>Жильцы (${b.residents.length}/${def.capacity})</h3>${residents || 'никто не живёт'}</div>` : ''}
       ${def.workers && b.underConstruction === undefined ? `<div class="section"><h3>Работники (${b.workers.length}/${b.maxWorkers ?? def.workers})</h3>${workers || 'никого'}
         <div class="actions"><button class="btn small" data-bact="hire" data-tip="Нанять безработного">+ рабочий</button><button class="btn small" data-bact="fire" data-tip="Уволить последнего">− рабочий</button><button class="btn small" data-bact="max-" data-tip="Меньше мест">предел −</button><button class="btn small" data-bact="max+" data-tip="Больше мест">предел +</button><button class="btn small ${b.closed ? 'active' : ''}" data-bact="close">${b.closed ? 'Открыть' : 'Закрыть'}</button><button class="btn small ${b.priority === 1 ? 'active' : ''}" data-bact="prio" data-tip="Приоритет снабжения">Приоритет</button></div></div>` : ''}
-      <div class="section"><h3>Запасы</h3>${storage || 'пусто'}${revenue}</div>
+      <div class="section"><h3>Запасы${BUILDING_DEFS[b.type].stores || b.type === BuildingType.Warehouse ? ` (${Math.round(storedTotal(b))}/${storeCapacity(b)})` : ''}</h3>${storage || 'пусто'}${revenue}${b.storage._cold ? `<div class="bad">Печь не топлена ${b.storage._cold} дн.</div>` : ''}</div>
       <div class="section"><h3>Правитель</h3><div class="actions">${upgradePlan(b) && b.underConstruction === undefined ? `<button class="btn small" data-bact="upgrade" data-tip="${esc(`${upgradePlan(b)!.label}: ${costText(upgradePlan(b)!.cost, upgradePlan(b)!.money)}`)}">Улучшить (${upgradePlan(b)!.label})</button>` : ''}${b.type !== BuildingType.Castle ? '<button class="btn small bad" data-bact="demolish" data-tip="Снести с возвратом половины материалов">Снести</button>' : ''}</div></div>
       ${this.reaction ? `<div class="reaction">${this.reaction}</div>` : ''}`;
   }
@@ -492,9 +493,7 @@ export class SidePanel {
 
 const MATERIAL_NAMES: Record<string, string> = { wood: 'дерево', timber: 'фахверк', stone: 'камень', brick: 'кирпич' };
 const ROOF_NAMES: Record<string, string> = { thatch: 'солома', tile: 'черепица', slate: 'сланец', wood: 'дранка' };
-export const GOOD_NAMES: Record<string, string> = {
-  bread: 'хлеб', grain: 'зерно', flour: 'мука', meat: 'мясо', hide: 'шкуры', leather: 'кожа', wood: 'брёвна', planks: 'доски', stone: 'камень', ale: 'эль', tools: 'инструменты', goods: 'изделия', cloth: 'ткань', money: 'деньги', food: 'еда',
-};
+export const GOOD_NAMES: Record<string, string> = Object.assign(Object.fromEntries(Object.entries(GOOD_INFO).map(([k, v]) => [k, v.name])), { money: 'деньги', food: 'еда' });
 
 function ageWord(n: number): string {
   const m10 = n % 10;

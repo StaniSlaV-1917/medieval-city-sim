@@ -8,7 +8,18 @@ import { clamp } from '../core/math';
 import { EventKind } from '../events/chronicle';
 import { pay, householdPay } from './money';
 
-const NORMAL_DAYS: Record<Good, number> = { grain: 8, flour: 3, bread: 1.5, meat: 2, hide: 4, leather: 5, wood: 4, planks: 5, stone: 6, ale: 2, tools: 6, goods: 6 };
+const NORMAL_DAYS_BASE: Partial<Record<Good, number>> = { grain: 8, flour: 3, bread: 1.5, meat: 2, hide: 4, leather: 5, wood: 4, planks: 5, stone: 6, ale: 2, tools: 6, goods: 6, firewood: 6, fish: 1.5, vegetables: 3, eggs: 2, cheese: 4, berries: 2 };
+const NORMAL_DAYS: Record<Good, number> = Object.fromEntries(GOODS.map((g) => [g, NORMAL_DAYS_BASE[g] ?? 5])) as Record<Good, number>;
+
+/** Вид движения товара для книги учёта: произведено / потреблено / испортилось / продано вовне / куплено вовне / перемещение (не меняет запас города) */
+export type FlowKind = 'produced' | 'consumed' | 'spoiled' | 'sold' | 'bought' | 'transfer';
+export interface Ledger {
+  produced: number;
+  consumed: number;
+  spoiled: number;
+  sold: number;
+  bought: number;
+}
 
 export class Market {
   prices: Record<Good, number>;
@@ -27,6 +38,8 @@ export class Market {
   /** Запас на начало дня (для тренда) */
   dayStartStock: Record<Good, number>;
   private dayStartSet = false;
+  /** Книга учёта с начала игры: произведено = потреблено + на складе + испортилось + продано (инвариант)*/
+  ledger: Record<Good, Ledger>;
 
   /** Восстановить дневной снимок из сохранения */
   restoreDayStart(stock: Record<Good, number>): void {
@@ -43,13 +56,21 @@ export class Market {
     this.soldToday = z();
     this.soldYesterday = z();
     this.dayStartStock = z();
+    this.ledger = Object.fromEntries(GOODS.map((g) => [g, { produced: 0, consumed: 0, spoiled: 0, sold: 0, bought: 0 }])) as Record<Good, Ledger>;
   }
 
-  /** Учёт движения товара (для полосы ресурсов) */
-  flow(good: Good, label: string, n: number): void {
-    if (!n) return;
+  /**
+   * Учёт движения товара: для полосы ресурсов (по источникам) и для книги учёта.
+   * kind по умолчанию: + → произведено, − → потреблено; перемещения (покупка в инвентарь, доставка) — 'transfer'.
+   */
+  flow(good: Good, label: string, n: number, kind?: FlowKind): void {
+    if (!n || !GOOD_INFO[good]) return;
     const f = this.flowsToday[good] ?? (this.flowsToday[good] = {});
     f[label] = (f[label] ?? 0) + n;
+    const k: FlowKind = kind ?? (n > 0 ? 'produced' : 'consumed');
+    if (k === 'transfer') return;
+    const l = this.ledger[good] ?? (this.ledger[good] = { produced: 0, consumed: 0, spoiled: 0, sold: 0, bought: 0 });
+    l[k] += Math.abs(n);
   }
 
   price(good: Good): number {
@@ -80,6 +101,15 @@ export class Market {
     const pop = sim.stats.population || sim.citizens.length;
     this.demand.bread = pop * 1.4;
     this.demand.meat = pop * 0.12;
+    this.demand.fish = pop * 0.1;
+    this.demand.vegetables = pop * 0.15;
+    this.demand.eggs = pop * 0.08;
+    this.demand.cheese = pop * 0.04;
+    this.demand.firewood = pop * 0.25;
+    this.demand.clothes = pop * 0.01;
+    this.demand.shoes = pop * 0.01;
+    this.demand.candles = pop * 0.02;
+    this.demand.pottery = pop * 0.01;
     this.demand.flour = this.demand.bread / 3;
     this.demand.grain = this.demand.flour + 20;
     this.demand.ale = pop * 0.3;
@@ -152,7 +182,7 @@ export class Market {
     }
     b.storage[good] = (b.storage[good] ?? 0) - q;
     this.soldToday[good] += q;
-    this.flow(good, 'куплено горожанами', -q);
+    this.flow(good, 'куплено горожанами', -q, 'transfer');
     b.storage['revenue'] = (b.storage['revenue'] ?? 0) + cost;
     return q;
   }

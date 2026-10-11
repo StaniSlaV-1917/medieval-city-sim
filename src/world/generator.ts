@@ -1161,10 +1161,28 @@ function genOutskirts(ctx: Ctx): void {
     }
   }
 
-  // Лесопилка у северной дороги, близко к лесу
+  // Лесопилка у северной дороги, близко к лесу; рядом — изба лесоруба и дровяной сарай (фаза 15)
   {
     const y = Math.max(6, gN.y - rng.int(10, 15));
-    placeNear(ctx, BuildingType.Sawmill, cx + rng.int(-3, 3), y, 8, false, 5, 4);
+    const saw = placeNear(ctx, BuildingType.Sawmill, cx + rng.int(-3, 3), y, 8, false, 5, 4);
+    if (saw) {
+      if (!placeNear(ctx, BuildingType.Woodcutter, saw.x - 6, saw.y + rng.int(-2, 2), 8, false, 3, 3)) placeNear(ctx, BuildingType.Woodcutter, saw.x + saw.w + 4, saw.y - 4, 12, false, 3, 3);
+      if (!placeNear(ctx, BuildingType.Woodshed, saw.x + saw.w + 3, saw.y + 1, 8, false, 3, 2)) placeNear(ctx, BuildingType.Woodshed, saw.x, saw.y + saw.h + 4, 12, false, 3, 2);
+    }
+  }
+  // Амбар у восточных ворот, охотничья изба у западного леса, рыбацкая хижина у реки (фаза 15)
+  placeNear(ctx, BuildingType.Granary, gE.x + 6, gE.y - 5, 8, false, 4, 3);
+  placeNear(ctx, BuildingType.Hunter, gN.x + rng.int(6, 10), gN.y - rng.int(4, 8), 10, false, 3, 3);
+  {
+    const by = world.poi.bridge.y + rng.int(4, 8);
+    const rc = world.poi.riverCenterX[Math.max(0, Math.min(H - 1, by))];
+    let x = Math.round(rc) + 3;
+    while (x < W - 4 && tileAt(world, x, by) !== Tile.Grass && tileAt(world, x, by) !== Tile.Meadow && tileAt(world, x, by) !== Tile.Sand) x++;
+    let f = placeNear(ctx, BuildingType.Fisher, x + 1, by, 6, false, 3, 2);
+    if (!f) {
+      // у берега нет дороги: протоптать тропинку от берега к ближайшей дороге и поставить хижину у неё
+      if (carvePathToRoad(ctx, x + 2, by, 40)) f = placeNear(ctx, BuildingType.Fisher, x + 1, by, 6, false, 3, 2);
+    }
   }
 
   // Каменоломня — северо-восток, скалы

@@ -6,7 +6,7 @@ import { startTalk } from './talk';
 import { interrupt, makeCtx } from './brain';
 import { BuildingType, BUILDING_DEFS, Building, workerCap } from '../world/buildings';
 import { EventKind } from '../events/chronicle';
-import { Good, GOOD_INFO } from '../economy/goods';
+import { Good, GOOD_INFO, isGood } from '../economy/goods';
 import { sellersOf } from '../economy/market';
 import { assignJob, professionFor } from '../sim/population';
 import { TICKS_PER_DAY } from '../core/time';
@@ -512,6 +512,8 @@ export function leaveCity(sim: Simulation, c: Citizen, reason: string): void {
   c.alive = false;
   c.inside = -1;
   c.order = null;
+  for (const [k, v] of Object.entries(c.inventory)) if (v > 0 && isGood(k)) sim.market.flow(k, 'унесли из города', -v, 'sold');
+  c.inventory = {};
   if (c.home >= 0) {
     const h = sim.world.buildings[c.home];
     h.residents = h.residents.filter((id) => id !== c.id);

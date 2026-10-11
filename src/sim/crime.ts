@@ -668,8 +668,8 @@ const jailed: ActionDef = {
   },
   tick(ctx) {
     const c = ctx.c;
-    // тюремная похлёбка: голод падает медленнее
-    c.needs.hunger = Math.min(100, c.needs.hunger + 0.12);
+    // тюремная похлёбка: впроголодь, но до обморока не доводят
+    c.needs.hunger = Math.min(100, c.needs.hunger + (c.needs.hunger < 35 ? 0.6 : 0.12));
     c.needs.fun = Math.max(0, c.needs.fun - 0.05);
     return false;
   },

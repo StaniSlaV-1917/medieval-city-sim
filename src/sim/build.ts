@@ -134,6 +134,7 @@ export function placeBuilding(sim: Simulation, item: BuildItem, x: number, y: nu
   if (type === BuildingType.Tavern) b.name = sim.rng.pick(['Новый двор', 'У ворот', 'Пять подков', 'Тихий омут', 'Герб правителя']);
   // стоимость работ — из казны сразу
   sim.treasury -= item.money;
+  sim.moneyDestroyed += item.money; // плата мастерам со стороны
   b.storage['_cost_money'] = item.money;
   for (const [g, n] of Object.entries(item.cost)) b.storage[`_need_${g}`] = n ?? 0;
   world.buildings.push(b);
@@ -416,7 +417,11 @@ export function demolishBuilding(sim: Simulation, id: number): string {
     if (wh) {
       wh.storage[g] = (wh.storage[g] ?? 0) + n;
       sim.market.flow(g, 'снос', n);
-    } else sim.treasury += Math.round(n * sim.market.prices[g] * 0.5);
+    } else {
+      const sum = Math.round(n * sim.market.prices[g] * 0.5);
+      sim.treasury += sum;
+      sim.moneyCreated += sum;
+    }
     parts.push(`${n} ${g === 'planks' ? 'досок' : 'камня'}`);
   }
   // освободить тайлы
@@ -462,6 +467,7 @@ export function upgradeBuilding(sim: Simulation, id: number): string {
   if (!plan) return 'Это здание улучшить нельзя.';
   if (sim.treasury < plan.money) return `В казне нет ${plan.money} монет.`;
   sim.treasury -= plan.money;
+  sim.moneyDestroyed += plan.money;
   b.upgradeTo = { type: plan.type, material: plan.material, roof: plan.roof, stories: plan.stories };
   b.underConstruction = 0;
   b.buildStage = 0;

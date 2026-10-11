@@ -14,6 +14,18 @@ import { Citizen, CitizenState } from '../sim/citizen';
 import { getCitizenSprite } from './citizenSprites';
 import { drawBubbles } from './bubbles';
 
+/** Вид груза по инвентарю жителя */
+function cargoKind(c: Citizen): 'logs' | 'barrel' | 'stone' | 'sack' | null {
+  const inv = c.inventory;
+  let total = 0;
+  for (const k in inv) total += inv[k] ?? 0;
+  if (total < 2) return null;
+  if ((inv.wood ?? 0) + (inv.planks ?? 0) + (inv.firewood ?? 0) >= 2) return 'logs';
+  if ((inv.ale ?? 0) + (inv.wine ?? 0) + (inv.barrels ?? 0) >= 2) return 'barrel';
+  if ((inv.stone ?? 0) + (inv.clay ?? 0) + (inv.iron_ore ?? 0) + (inv.brick ?? 0) >= 2) return 'stone';
+  return 'sack';
+}
+
 export interface BubbleOpts {
   density: number;
   favorites: number[];
@@ -383,6 +395,36 @@ export class Renderer {
     g.fillStyle = 'rgba(0,0,0,0.22)';
     g.fillRect(Math.round(cx) - 3, Math.round(cy) + 1, 6, 2);
     g.drawImage(s.canvas, s.x, s.y, s.w, s.h, x, y, s.w, s.h);
+    // груз на плече: мешок, брёвна, бочка, камень (виден, когда несёт больше одной единицы)
+    const cargo = cargoKind(c);
+    if (cargo) {
+      const px = Math.round(cx) + (c.dir === 1 ? -5 : 2);
+      const py = Math.round(cy) - 12;
+      if (cargo === 'logs') {
+        g.fillStyle = '#6a4a2a';
+        g.fillRect(px - 3, py, 9, 2);
+        g.fillRect(px - 3, py + 2, 9, 1);
+        g.fillStyle = '#a07a4a';
+        g.fillRect(px - 3, py, 1, 3);
+      } else if (cargo === 'barrel') {
+        g.fillStyle = '#7a5a3a';
+        g.fillRect(px, py - 1, 4, 5);
+        g.fillStyle = '#4a3a2a';
+        g.fillRect(px, py, 4, 1);
+        g.fillRect(px, py + 2, 4, 1);
+      } else if (cargo === 'stone') {
+        g.fillStyle = '#8a8580';
+        g.fillRect(px, py, 4, 4);
+        g.fillStyle = '#b0aba5';
+        g.fillRect(px, py, 2, 1);
+      } else {
+        g.fillStyle = '#c9b27a';
+        g.fillRect(px, py, 4, 4);
+        g.fillStyle = '#8a7a50';
+        g.fillRect(px + 1, py - 1, 2, 1);
+        g.fillRect(px, py + 3, 4, 1);
+      }
+    }
     if (this.selectedCitizen === c.id || this.hoverCitizen === c.id) {
       g.strokeStyle = this.selectedCitizen === c.id ? 'rgba(255,230,120,0.95)' : 'rgba(255,255,255,0.6)';
       g.lineWidth = 1;

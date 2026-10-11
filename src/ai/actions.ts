@@ -9,12 +9,13 @@ import { idx, isWalkableAt, isRoadTile, nearestWalkable } from '../world/world';
 import { TICKS_PER_HOUR, TICKS_PER_DAY, hourOf } from '../core/time';
 import { RNG } from '../core/rng';
 import { pay, householdMoney } from '../economy/money';
-import { RECIPES, wantedStock, addStock, producersOf } from '../economy/production';
+import { RECIPES, wantedStock, addStock, producersOf, OUTDOOR_WORK } from '../economy/production';
+import { AnimalKind } from '../sim/animals';
 import { sellersOf, isOpenAt } from '../economy/market';
 import { startTalk } from './talk';
 import { fellTree, takeResource, LOGS_PER_TREE, farmFertility } from '../sim/nature';
-import { ResourceKind } from '../world/world';
-import { Good, GOOD_INFO } from '../economy/goods';
+import { ResourceKind, inBounds } from '../world/world';
+import { Good, GOOD_INFO, GOODS } from '../economy/goods';
 import { EventKind } from '../events/chronicle';
 
 export interface ActionCtx {
@@ -89,8 +90,8 @@ export function enterBuilding(ctx: ActionCtx, b: Building): void {
     c.actionData.hauling = 0;
   }
   if (b.id === c.home && !c.actionData.hauling) {
-    // принёс еду домой — в общий запас семьи
-    for (const g of ['bread', 'meat'] as const) {
+    // принёс еду и дрова домой — в общий запас семьи
+    for (const g of ['bread', 'meat', 'firewood', 'peat', 'fish', 'vegetables', 'eggs', 'cheese', 'berries'] as const) {
       const n = c.inventory[g] ?? 0;
       if (n > 0) {
         b.storage[g] = (b.storage[g] ?? 0) + n;
@@ -211,9 +212,7 @@ const sleep: ActionDef = {
     const b = c.actionData.building >= 0 ? sim.world.buildings[c.actionData.building] : null;
     if (b) {
       enterBuilding(ctx, b);
-      if (c.needs.hunger < 60 && (b.storage['bread'] ?? 0) > 0) {
-        b.storage['bread']--;
-        sim.market.flow('bread', 'съедено дома', -1);
+      if (c.needs.hunger < 60 && eatFromStore(sim, b, 'bread', 'съедено дома') > 0) {
         c.needs.hunger = Math.min(100, c.needs.hunger + 45);
       }
     }
@@ -259,6 +258,46 @@ const WORK_THOUGHTS: Partial<Record<Profession, string[]>> = {
 function outdoorWorkSpot(ctx: ActionCtx, b: Building): { x: number; y: number } | null {
   const { sim, rng } = ctx;
   const world = sim.world;
+  // Фаза 15: добыча из природы — к ближайшему ресурсу/тайлу в радиусе работы
+  const ow = OUTDOOR_WORK[b.type];
+  if (ow) {
+    const cx = b.x + Math.floor(b.w / 2);
+    const cy = b.y + Math.floor(b.h / 2);
+    const cands: { x: number; y: number }[] = [];
+    for (let y = cy - ow.r; y <= cy + ow.r; y++)
+      for (let x = cx - ow.r; x <= cx + ow.r; x++) {
+        if (!inBounds(world, x, y)) continue;
+        const i = idx(world, x, y);
+        const okRes = ow.resource !== undefined && world.resource[i] === ow.resource && world.resourceAmount[i] > 0 && world.discovered[i];
+        const okTile = ow.tile !== undefined && world.tiles[i] === ow.tile && (ow.tile !== Tile.Grass || true);
+        if (okRes || okTile) cands.push({ x, y });
+      }
+    if (!cands.length) return null;
+    for (let k = 0; k < 12; k++) {
+      const t = rng.pick(cands);
+      if (isWalkableAt(world, t.x, t.y)) return t;
+      const nw = nearestWalkable(world, t.x, t.y, 2);
+      if (nw) return nw;
+    }
+    return null;
+  }
+  if (b.type === BuildingType.Hunter) {
+    const game = sim.animals.filter((a) => a.alive && (a.kind === AnimalKind.Deer || a.kind === AnimalKind.Boar) && Math.abs(a.x - b.doorX) + Math.abs(a.y - b.doorY) < 70);
+    if (game.length && rng.chance(0.75)) {
+      const a = rng.pick(game);
+      const spot = nearestWalkable(world, Math.round(a.x), Math.round(a.y), 3);
+      if (spot) return spot;
+    }
+    // дичи рядом нет — ставить силки в лесу вокруг избы
+    for (let k = 0; k < 24; k++) {
+      const tx = Math.round(b.x + b.w / 2 + rng.float(-16, 16));
+      const ty = Math.round(b.y + b.h / 2 + rng.float(-16, 16));
+      if (!inBounds(world, tx, ty) || world.tiles[idx(world, tx, ty)] !== Tile.Forest) continue;
+      const nw = nearestWalkable(world, tx, ty, 2);
+      if (nw) return nw;
+    }
+    return null;
+  }
   const want = b.type === BuildingType.Farm ? Tile.Field : b.type === BuildingType.Quarry ? Tile.Quarry : b.type === BuildingType.Sawmill ? Tile.Forest : -1;
   if (want < 0) return null;
   if (b.type === BuildingType.Sawmill && rng.chance(0.45)) return null; // часть работников пилит доски внутри
@@ -355,63 +394,107 @@ const work: ActionDef = {
     return false;
   },
   finish(ctx) {
-    const { c, sim } = ctx;
     const b = workOf(ctx);
     if (!b) return;
-    // Жалованье: раз в день по окончании смены
-    const hour = hourOf(sim.tick);
-    const day = Math.floor(sim.tick / TICKS_PER_DAY);
-    if (!isWorkHour(ctx.sched, hour + 0.5) && c.actionData.paidDay !== day) {
-      c.actionData.paidDay = day;
-      let wage = wageOf(c);
-      if (hasTrait(c, Trait.Lazy)) wage = Math.round(wage * 0.8);
-      {
-        // богатый хозяин платит щедрее (деньги возвращаются в оборот)
-        const ow = b.owner >= 0 && b.owner !== c.id ? sim.citizens[b.owner] : null;
-        if (ow && ow.alive && ow.money > 200) wage = Math.round(wage * Math.min(2, 1 + (ow.money - 200) / 300));
-      }
-      if (wage > 0) {
-        // владелец платит из своих денег (если есть), иначе казна; первичные производства
-        // (фермы, каменоломня, лесопилка, мельница, кожевня) продают сырьё за город — внешний доход
-        const owner = b.owner >= 0 && b.owner !== c.id ? sim.citizens[b.owner] : null;
-        const isPublic = PUBLIC_JOBS.has(b.type);
-        let paid = false;
-        if (owner && owner.alive && owner.money >= wage) {
-          pay(sim, owner, c, wage);
-          paid = true;
-        } else if (owner && owner.alive && owner.money >= Math.ceil(wage / 2)) {
-          // частичная выплата — хозяин на мели
-          pay(sim, owner, c, Math.floor(owner.money));
-          paid = true;
-          c.mood -= 4;
-          if (sim.rng.chance(0.2)) think(c, 'Хозяин заплатил только половину. Дела у него плохи.');
-        } else if ((isPublic || !owner) && sim.treasury >= wage) {
-          sim.treasury -= wage;
-          c.money += wage;
-          paid = true;
-        }
-        if (paid) shareWage(sim, c, wage);
-        else {
-          c.mood -= 10;
-          if (owner) {
-            changeRelation(c, owner.id, -6);
-            if (sim.rng.chance(0.3)) remember(c, sim.tick, `${fullName(owner)} не заплатил${owner.sex === 'f' ? 'а' : ''} мне за работу.`, 0.4, owner.id, 'unpaid');
-            think(c, 'Опять без жалованья… Чем семью кормить?');
-          }
-        }
-      }
-      // владелец лавки: выручка дня из казны-рынка — заглушка до фазы 3: небольшой доход от «покупателей» уже реализован через покупки
-    }
+    payShiftWage(ctx, b);
   },
 };
 
-const PUBLIC_JOBS = new Set<BuildingType>([BuildingType.TownHall, BuildingType.Barracks, BuildingType.Prison, BuildingType.Cathedral, BuildingType.Monastery, BuildingType.FireTower, BuildingType.Chapel]);
+/** Жалованье: раз в день по окончании смены (вызывается из work и из носильщиков) */
+export function payShiftWage(ctx: ActionCtx, b: Building): void {
+  const { c, sim } = ctx;
+  const hour = hourOf(sim.tick);
+  const day = Math.floor(sim.tick / TICKS_PER_DAY);
+  if (!isWorkHour(ctx.sched, hour + 0.5) && c.actionData.paidDay !== day) {
+    c.actionData.paidDay = day;
+    let wage = wageOf(c);
+    if (hasTrait(c, Trait.Lazy)) wage = Math.round(wage * 0.8);
+    {
+      // богатый хозяин платит щедрее (деньги возвращаются в оборот)
+      const ow = b.owner >= 0 && b.owner !== c.id ? sim.citizens[b.owner] : null;
+      if (ow && ow.alive && ow.money > 200) wage = Math.round(wage * Math.min(2, 1 + (ow.money - 200) / 300));
+    }
+    if (wage > 0) {
+      // владелец платит из своих денег (если есть), иначе казна; первичные производства
+      // (фермы, каменоломня, лесопилка, мельница, кожевня) продают сырьё за город — внешний доход
+      const owner = b.owner >= 0 && b.owner !== c.id ? sim.citizens[b.owner] : null;
+      const isPublic = PUBLIC_JOBS.has(b.type);
+      let paid = false;
+      if (owner && owner.alive && owner.money >= wage) {
+        pay(sim, owner, c, wage);
+        paid = true;
+      } else if (owner && owner.alive && owner.money >= Math.ceil(wage / 2)) {
+        // частичная выплата — хозяин на мели
+        pay(sim, owner, c, Math.floor(owner.money));
+        paid = true;
+        c.mood -= 4;
+        if (sim.rng.chance(0.2)) think(c, 'Хозяин заплатил только половину. Дела у него плохи.');
+      } else if ((isPublic || !owner) && sim.treasury >= wage) {
+        sim.treasury -= wage;
+        c.money += wage;
+        paid = true;
+      }
+      if (paid) shareWage(sim, c, wage);
+      else {
+        c.mood -= 10;
+        if (owner) {
+          changeRelation(c, owner.id, -6);
+          if (sim.rng.chance(0.3)) remember(c, sim.tick, `${fullName(owner)} не заплатил${owner.sex === 'f' ? 'а' : ''} мне за работу.`, 0.4, owner.id, 'unpaid');
+          think(c, 'Опять без жалованья… Чем семью кормить?');
+        }
+      }
+    }
+    // владелец лавки: выручка дня из казны-рынка — заглушка до фазы 3: небольшой доход от «покупателей» уже реализован через покупки
+  }
+}
+
+const PUBLIC_JOBS = new Set<BuildingType>([BuildingType.TownHall, BuildingType.Barracks, BuildingType.Prison, BuildingType.Cathedral, BuildingType.Monastery, BuildingType.FireTower, BuildingType.Chapel, BuildingType.Granary, BuildingType.Woodshed, BuildingType.Cellar]);
+
+/** Еда помимо хлеба и мяса, которую едят дома (фаза 15) */
+export const ALT_FOOD: Good[] = ['fish', 'vegetables', 'cheese', 'eggs', 'berries'];
+/** Съесть одну порцию (или остаток, если запас дробный после порчи); вернуть съеденное */
+export function eatFromStore(sim: Simulation, b: Building, good: Good, label: string): number {
+  const v = b.storage[good] ?? 0;
+  if (v < 0.5) return 0;
+  const take = Math.min(1, v);
+  b.storage[good] = v - take;
+  if (b.storage[good] < 1e-9) b.storage[good] = 0;
+  sim.market.flow(good, label, -take);
+  return take;
+}
+export function homeAltFood(home: Building): number {
+  let s = 0;
+  for (const g of ALT_FOOD) {
+    const v = home.storage[g] ?? 0;
+    if (v >= 1) s += v; // дробные остатки (после порчи) не в счёт
+  }
+  return s;
+}
+/** Сколько дома съедобного «порциями»: хлеб от половины буханки, прочее — от целой */
+export function homeEdible(home: Building): number {
+  const bread = home.storage['bread'] ?? 0;
+  return (bread >= 0.5 ? bread : 0) + homeAltFood(home);
+}
+
+/** Предел собственного запаса производителя: дальше — только через носильщиков/покупателей */
+export const PRODUCER_CAP = 120;
+
+/** Сколько готовой продукции лежит у производителя */
+export function outputStock(b: Building): number {
+  const r = RECIPES[b.type];
+  if (!r) return 0;
+  let s = 0;
+  for (const g of Object.keys(r.outputs) as Good[]) s += b.storage[g] ?? 0;
+  return s;
+}
 
 /** Производство за `ticks` тиков работы одного работника */
 export function produce(sim: Simulation, b: Building, c: Citizen, ticks: number): void {
   const r = RECIPES[b.type];
   if (!r || b.condition <= 0) return;
-  const hours = ticks / TICKS_PER_HOUR;
+  // изношенное здание работает хуже
+  const wear = b.condition < 0.3 ? 0.6 : b.condition < 0.6 ? 0.85 : 1;
+  const hours = (ticks * wear) / TICKS_PER_HOUR;
   // лесорубы в лесу валят брёвна, а не пилят доски: каждые LOGS_PER_TREE брёвен — одно дерево становится пнём
   if (b.type === BuildingType.Sawmill && c.actionData.outdoor) {
     const cut = 1.2 * hours * (hasTrait(c, Trait.Hardworking) ? 1.2 : 1);
@@ -427,6 +510,82 @@ export function produce(sim: Simulation, b: Building, c: Citizen, ticks: number)
     }
     addStock(b, 'wood', cut);
     sim.market.flow('wood', 'лесорубы', cut);
+    return;
+  }
+  // Фаза 15: промыслы в поле — ресурс с карты (конечный или сезонный), дичь, пастбище, дрова
+  const ow = OUTDOOR_WORK[b.type];
+  if (ow || b.type === BuildingType.Hunter) {
+    if (!c.actionData.outdoor) return; // в здании такой работник ничего не добывает
+    if (outputStock(b) >= (b.type === BuildingType.Woodcutter ? PRODUCER_CAP * 3 : PRODUCER_CAP)) {
+      if (sim.rng.chance(0.05)) think(c, 'Склад полон — пусть носильщики заберут.');
+      return;
+    }
+    const bname = BUILDING_DEFS[b.type].name;
+    let eff = hasTrait(c, Trait.Hardworking) ? 1.2 : hasTrait(c, Trait.Lazy) ? 0.8 : 1;
+    if (c.needs.energy < 25 || c.needs.hunger < 25) eff *= 0.8;
+    if (b.type === BuildingType.Hunter) {
+      // охота: шанс добыть зверя рядом
+      const near = sim.animals.find((a) => a.alive && (a.kind === AnimalKind.Deer || a.kind === AnimalKind.Boar) && Math.abs(a.x - c.x) + Math.abs(a.y - c.y) < 7);
+      if (near && sim.rng.chance(0.22 * hours * eff)) {
+        near.alive = false;
+        const meat = near.kind === AnimalKind.Boar ? 7 : 5;
+        addStock(b, 'meat', meat);
+        addStock(b, 'hide', 2);
+        sim.market.flow('meat', bname, meat);
+        sim.market.flow('hide', bname, 2);
+        if (sim.rng.chance(0.5)) say(c, sim.rng.pick(['Попал!', 'Добыча!', 'Хорош олень.']), 30, false, sim.tick, 'happy');
+        c.actionData.outdoor = 0; // вернуться к избе с добычей
+      } else if (!near) {
+        // силки и мелкая дичь: понемногу, но стабильно
+        const n = 0.18 * hours * eff;
+        addStock(b, 'meat', n);
+        sim.market.flow('meat', bname, n);
+        if (sim.rng.chance(0.3)) {
+          addStock(b, 'hide', n * 0.3);
+          sim.market.flow('hide', bname, n * 0.3);
+        }
+      }
+      return;
+    }
+    if (b.type === BuildingType.Woodcutter) {
+      const cut = 1.8 * hours * eff;
+      c.actionData.cutProgress = (c.actionData.cutProgress ?? 0) + cut;
+      if (c.actionData.cutProgress >= LOGS_PER_TREE) {
+        c.actionData.cutProgress -= LOGS_PER_TREE;
+        if (!fellTree(sim, Math.round(c.x), Math.round(c.y), 3)) {
+          if (sim.rng.chance(0.1)) think(c, 'Деревья кончились. Надо сажать рощу.');
+          c.actionData.cutProgress = LOGS_PER_TREE;
+          return;
+        }
+      }
+      for (const [g, rate] of Object.entries(ow!.outputs) as [Good, number][]) {
+        addStock(b, g, rate * hours * eff);
+        sim.market.flow(g, bname, rate * hours * eff);
+      }
+      return;
+    }
+    let factor = 1;
+    if (ow!.resource !== undefined) {
+      const rateSum = Object.values(ow!.outputs).reduce((s, v) => s + (v ?? 0), 0);
+      const want = rateSum * hours * eff * ow!.take;
+      const got = takeResource(sim.world, Math.round(c.x), Math.round(c.y), ow!.resource as ResourceKind, 4, want);
+      if (got <= 0) {
+        if (sim.rng.chance(0.05)) think(c, 'Здесь уже ничего не осталось.');
+        c.actionData.outdoor = 0;
+        return;
+      }
+      factor = want > 0 ? got / want : 1;
+    } else if (ow!.tile !== undefined && b.type === BuildingType.Sheepfold) {
+      let n = 0;
+      for (let y = b.y - ow!.r; y <= b.y + b.h + ow!.r; y++) for (let x = b.x - ow!.r; x <= b.x + b.w + ow!.r; x++) if (inBounds(sim.world, x, y) && sim.world.tiles[idx(sim.world, x, y)] === Tile.Pasture) n++;
+      factor = Math.min(1, n / 25);
+    }
+    for (const [g, rate] of Object.entries(ow!.outputs) as [Good, number][]) {
+      const n = rate * hours * eff * factor;
+      if (n <= 0) continue;
+      addStock(b, g, n);
+      sim.market.flow(g, bname, n);
+    }
     return;
   }
   // каменоломня: камень берётся из месторождения, иссякшее — не даёт ничего
@@ -580,7 +739,7 @@ const eatHome: ActionDef = {
     const { c, hour, sched } = ctx;
     const home = homeOf(ctx);
     if (!home) return 0;
-    const bread = (home.storage['bread'] ?? 0) + (c.inventory['bread'] ?? 0);
+    const bread = homeEdible(home) + (c.inventory['bread'] ?? 0);
     if (bread <= 0) return 0;
     const h = c.needs.hunger;
     if (h > 60) return 0;
@@ -604,11 +763,19 @@ const eatHome: ActionDef = {
     const home = sim.world.buildings[c.actionData.building];
     if (!home) return actFor(ctx, 10);
     enterBuilding(ctx, home);
-    if ((c.inventory['bread'] ?? 0) > 0) c.inventory['bread']--;
-    else if ((home.storage['bread'] ?? 0) > 0) {
-      home.storage['bread']--;
+    if ((c.inventory['bread'] ?? 0) > 0) {
+      c.inventory['bread']--;
       sim.market.flow('bread', 'съедено дома', -1);
-    } else return actFor(ctx, 10);
+    } else if (eatFromStore(sim, home, 'bread', 'съедено дома') <= 0) {
+      // без хлеба — рыба, овощи, сыр, яйца, ягоды
+      const alt = ALT_FOOD.find((g) => (home.storage[g] ?? 0) >= 1);
+      if (!alt) return actFor(ctx, 10);
+      home.storage[alt]--;
+      sim.market.flow(alt, 'съедено дома', -1);
+      c.needs.hunger = Math.min(100, c.needs.hunger + GOOD_INFO[alt].food + (isChild(c) ? 10 : 0));
+      actFor(ctx, 15 * 5);
+      return;
+    }
     c.needs.hunger = Math.min(100, c.needs.hunger + (isChild(c) ? 70 : 55));
     if (c.needs.hunger < 90 && (home.storage['meat'] ?? 0) >= 1 && ctx.rng.chance(0.5)) {
       home.storage['meat']--;
@@ -710,6 +877,7 @@ const buyFood: ActionDef = {
     // перекусить на месте
     if (c.needs.hunger < 60) {
       c.inventory[good]--;
+      sim.market.flow(good, 'съедено на ходу', -1);
       c.needs.hunger = Math.min(100, c.needs.hunger + GOOD_INFO[good].food);
     }
     // богатые берут и мяса
@@ -762,10 +930,16 @@ const tavern: ActionDef = {
     // еда: хлеб и, если есть деньги, мясо
     if (c.needs.hunger < 50) {
       const got = m.buyRetail(sim, c, b, 'bread', 1, false);
-      if (got) c.needs.hunger = Math.min(100, c.needs.hunger + 45);
+      if (got) {
+        c.needs.hunger = Math.min(100, c.needs.hunger + 45);
+        m.flow('bread', 'съедено в таверне', -got);
+      }
       if (c.money > 15 && (b.storage['meat'] ?? 0) >= 1) {
         const mt = m.buyRetail(sim, c, b, 'meat', 1, false);
-        if (mt) c.needs.hunger = Math.min(100, c.needs.hunger + 40);
+        if (mt) {
+          c.needs.hunger = Math.min(100, c.needs.hunger + 40);
+          m.flow('meat', 'съедено в таверне', -mt);
+        }
       }
     }
     const cups = hasTrait(c, Trait.Drunkard) ? 3 : rng.chance(0.3) ? 2 : 1;
@@ -776,6 +950,7 @@ const tavern: ActionDef = {
       drank = 1;
       if (rng.chance(0.5)) say(c, 'За здоровье бургомистра!', 35, false, sim.tick);
     } else drank = m.buyRetail(sim, c, b, 'ale', cups, false);
+    if (drank > 0) m.flow('ale', 'выпито в таверне', -drank);
     if (drank === 0 && (b.storage['ale'] ?? 0) <= 0) {
       say(c, pickText(rng, ['Что значит — эль кончился?!', 'Пустые бочки? Позор!']), 35, false, sim.tick);
       think(c, 'В таверне нет эля. Ну и город.');
@@ -868,7 +1043,7 @@ const haul: ActionDef = {
   },
 };
 
-const GOODS_LIST: Good[] = ['grain', 'flour', 'bread', 'meat', 'hide', 'leather', 'wood', 'planks', 'stone', 'ale', 'tools', 'goods'];
+const GOODS_LIST: Good[] = GOODS;
 const GOODS_INDEX: Record<Good, number> = Object.fromEntries(GOODS_LIST.map((g, i) => [g, i])) as Record<Good, number>;
 
 function pickHaulGood(ctx: ActionCtx, b: Building): { good: Good; from: Building; n: number; deficit: number } | null {
@@ -1056,9 +1231,7 @@ const homeRest: ActionDef = {
     // поужинать, если дома есть хлеб
     if (c.needs.hunger < 55 && c.inside >= 0) {
       const home = sim.world.buildings[c.inside];
-      if (home && (home.storage['bread'] ?? 0) > 0) {
-        home.storage['bread']--;
-        sim.market.flow('bread', 'съедено дома', -1);
+      if (home && eatFromStore(sim, home, 'bread', 'съедено дома') > 0) {
         c.needs.hunger = Math.min(100, c.needs.hunger + 50);
       }
     }
@@ -1293,6 +1466,7 @@ const shopLuxury: ActionDef = {
       c.mood += 3;
       if (rng.chance(0.4)) say(c, pickText(rng, ['Добротная вещь.', 'Дороговато, но хорошо.', 'Заверните.']), 30, false, sim.tick);
       // вещь «потребляется» — изнашивается
+      sim.market.flow(good, 'куплено в обиход', -got);
     }
     if (BUILDING_DEFS[b.type].enterable) enterBuilding(ctx, b);
     actFor(ctx, rng.int(5, 12) * 5);

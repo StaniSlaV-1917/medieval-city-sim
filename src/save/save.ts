@@ -104,7 +104,7 @@ export function serialize(sim: Simulation): string {
     importCost: sim.importCost,
     chronicle: sim.chronicle.events,
     history: sim.history,
-    market: { prices: sim.market.prices, yearFactor: sim.market.yearFactor, soldToday: sim.market.soldToday, soldYesterday: sim.market.soldYesterday, dayStartStock: sim.market.dayStartStock, flowsToday: sim.market.flowsToday, flowsYesterday: sim.market.flowsYesterday },
+    market: { prices: sim.market.prices, yearFactor: sim.market.yearFactor, soldToday: sim.market.soldToday, soldYesterday: sim.market.soldYesterday, dayStartStock: sim.market.dayStartStock, flowsToday: sim.market.flowsToday, flowsYesterday: sim.market.flowsYesterday, ledger: sim.market.ledger },
     weather: sim.weather,
     fires: sim.fires,
     funerals: sim.funerals,
@@ -198,6 +198,7 @@ export function deserialize(json: string): Simulation {
   if (m.dayStartStock) sim.market.restoreDayStart(m.dayStartStock as Record<string, number> as typeof sim.market.dayStartStock);
   if (m.flowsToday) sim.market.flowsToday = m.flowsToday as typeof sim.market.flowsToday;
   if (m.flowsYesterday) sim.market.flowsYesterday = m.flowsYesterday as typeof sim.market.flowsYesterday;
+  if (m.ledger) Object.assign(sim.market.ledger, m.ledger as Plain);
   Object.assign(sim.weather, d.weather as Plain);
   sim.fires = d.fires as typeof sim.fires;
   sim.funerals = d.funerals as typeof sim.funerals;

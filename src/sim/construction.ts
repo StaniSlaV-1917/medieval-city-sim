@@ -13,7 +13,7 @@ import { newCitizen, moveIn, assignJob, professionFor, randomTraits } from './po
 import { MALE_NAMES, FEMALE_NAMES, SURNAMES } from './names';
 import { dist2 } from '../core/math';
 import { materialsLeft, applyUpgrade } from './build';
-import type { Good } from '../economy/goods';
+import { isGood, Good } from '../economy/goods';
 
 export const STAGE_NAMES = ['фундамент', 'каркас', 'стены', 'крыша'];
 
@@ -23,6 +23,7 @@ export function onBuildingDestroyed(sim: Simulation, b: Building, cause: string)
   b.lit = false;
   b.underConstruction = 0;
   b.buildStage = 0;
+  for (const [k, v] of Object.entries(b.storage)) if (isGood(k) && v > 0) sim.market.flow(k, `пропало (${cause})`, -v, 'spoiled');
   b.storage = {};
   // жильцы выходят и ищут жильё
   for (const id of b.residents) {
@@ -189,7 +190,7 @@ const build: ActionDef = {
           else sim.treasury += price;
           c.inventory[good] = (c.inventory[good] ?? 0) + n;
           c.actionData.hauling = 1;
-          sim.market.flow(good as Good, 'стройка', -n);
+          sim.market.flow(good as Good, 'на стройку', -n, 'transfer');
           if (rng.chance(0.4)) say(c, rng.pick(['Грузим на стройку.', 'Доски — на стройку!', 'Камень пошёл.']), 30, false, sim.tick);
         } else if (rng.chance(0.3)) think(c, price > sim.treasury ? 'Казна не платит за материалы.' : 'Материалов нет.');
       }
@@ -201,14 +202,7 @@ const build: ActionDef = {
     }
     if (phase === 2) {
       // принёс: сложить на площадке
-      for (const good of ['planks', 'stone'] as const) {
-        const n = c.inventory[good] ?? 0;
-        if (n > 0) {
-          site.storage[`_got_${good}`] = (site.storage[`_got_${good}`] ?? 0) + n;
-          c.inventory[good] = 0;
-        }
-      }
-      c.actionData.hauling = 0;
+      dropMaterials(sim, c, site);
       c.actionData.phase = 0;
     }
     c.dir = 3;
@@ -264,9 +258,39 @@ const build: ActionDef = {
   finish(ctx) {
     const { c, sim } = ctx;
     const site = sim.world.buildings[c.actionData.site];
+    // прервали с материалами в руках — сложить их на площадке (или на ближайшем складе, если стройка исчезла)
+    if ((c.inventory.planks ?? 0) > 0 || (c.inventory.stone ?? 0) > 0) {
+      if (site && site.underConstruction !== undefined) dropMaterials(sim, c, site);
+      else {
+        const wh = sim.world.buildings.find((b) => b.w > 0 && b.underConstruction === undefined && (b.type === BuildingType.Warehouse || b.type === BuildingType.Sawmill || b.type === BuildingType.Quarry));
+        for (const good of ['planks', 'stone'] as const) {
+          const n = c.inventory[good] ?? 0;
+          if (n <= 0) continue;
+          if (wh) {
+            wh.storage[good] = (wh.storage[good] ?? 0) + n;
+            sim.market.flow(good, 'возврат со стройки', n, 'transfer');
+          } else sim.market.flow(good, 'брошено на стройке', -n, 'spoiled');
+          c.inventory[good] = 0;
+        }
+        c.actionData.hauling = 0;
+      }
+    }
     if (c.action === 'build' && (!site || site.underConstruction === undefined)) c.action = '';
   },
 };
+
+/** Сложить принесённые доски/камень на площадке: с этого момента материал считается потраченным */
+function dropMaterials(sim: Simulation, c: Citizen, site: Building): void {
+  for (const good of ['planks', 'stone'] as const) {
+    const n = c.inventory[good] ?? 0;
+    if (n > 0) {
+      site.storage[`_got_${good}`] = (site.storage[`_got_${good}`] ?? 0) + n;
+      c.inventory[good] = 0;
+      sim.market.flow(good, 'стройка', -n);
+    }
+  }
+  c.actionData.hauling = 0;
+}
 
 function finishConstruction(sim: Simulation, b: Building): void {
   b.underConstruction = undefined;

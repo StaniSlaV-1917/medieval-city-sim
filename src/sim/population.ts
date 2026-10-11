@@ -325,15 +325,23 @@ export function createPopulation(sim: Simulation): void {
     }
     c.inventory['bread'] = isChild(c) ? 0 : rng.int(0, 2);
   }
-  // Еда в домах
-  for (const h of households) h.home.storage['bread'] = rng.int(2, 6) + h.members.length;
+  // Еда и дрова в домах
+  for (const h of households) {
+    h.home.storage['bread'] = rng.int(2, 6) + h.members.length;
+    h.home.storage['firewood'] = rng.int(6, 14);
+  }
   // Стартовые запасы и капитал предприятий
   const INIT: Partial<Record<BuildingType, Record<string, number>>> = {
     [BuildingType.Farm]: { grain: 45, meat: 6, hide: 3, tools: 1 },
     [BuildingType.Mill]: { grain: 25, flour: 30 },
     [BuildingType.Bakery]: { flour: 25, bread: 30 },
     [BuildingType.Butcher]: { meat: 12 },
-    [BuildingType.Tavern]: { ale: 30, bread: 10, meat: 3, grain: 10 },
+    [BuildingType.Tavern]: { ale: 30, bread: 10, meat: 3, grain: 10, firewood: 10 },
+    [BuildingType.Woodshed]: { firewood: 160, peat: 20 },
+    [BuildingType.Woodcutter]: { wood: 6, firewood: 20 },
+    [BuildingType.Granary]: { grain: 80, flour: 20 },
+    [BuildingType.Hunter]: { meat: 6, hide: 3 },
+    [BuildingType.Fisher]: { fish: 10 },
     [BuildingType.Sawmill]: { wood: 20, planks: 15, tools: 1 },
     [BuildingType.Quarry]: { stone: 15, tools: 1 },
     [BuildingType.Smithy]: { wood: 8, tools: 6 },
@@ -408,12 +416,15 @@ export function assignJob(sim: Simulation, c: Citizen, b: Building, prof: Profes
   c.workplace = b.id;
   c.profession = prof;
   if (!b.workers.includes(c.id)) b.workers.push(c.id);
-  if (b.owner < 0 && b.type !== BuildingType.Castle && b.type !== BuildingType.TownHall && b.type !== BuildingType.Barracks && b.type !== BuildingType.Cathedral && b.type !== BuildingType.Monastery && b.type !== BuildingType.Prison) b.owner = c.id;
+  if (b.owner < 0 && !NO_OWNER.has(b.type)) b.owner = c.id;
 }
 
 export function professionFor(type: BuildingType, index: number): Profession {
   return professionForWorkplace(type, index);
 }
+
+/** Здания без хозяина: доход и жалованье — через казну (городские хранилища — тоже) */
+export const NO_OWNER = new Set<BuildingType>([BuildingType.Castle, BuildingType.TownHall, BuildingType.Barracks, BuildingType.Cathedral, BuildingType.Monastery, BuildingType.Prison, BuildingType.Granary, BuildingType.Woodshed, BuildingType.Cellar]);
 
 function assignProfessions(sim: Simulation, rng: RNG): void {
   const world = sim.world;
@@ -429,8 +440,11 @@ function assignProfessions(sim: Simulation, rng: RNG): void {
     const need = def.workers - b.workers.length;
     for (let k = 0; k < need; k++) jobs.push({ b, prof: professionFor(b.type, b.workers.length + k), idx: k });
   }
-  // Сначала ключевые уникальные здания
-  jobs.sort((a, b) => Number(BUILDING_DEFS[b.b.type].unique) - Number(BUILDING_DEFS[a.b.type].unique));
+  // Сначала ключевые уникальные здания, затем хлебная цепочка, промыслы на окраине — в конце
+  const LATE = new Set<BuildingType>([BuildingType.Hunter, BuildingType.Fisher, BuildingType.Woodcutter, BuildingType.Woodshed, BuildingType.Granary, BuildingType.Gatherer, BuildingType.PeatCutter]);
+  const FOOD = new Set<BuildingType>([BuildingType.Farm, BuildingType.Mill, BuildingType.Bakery, BuildingType.Butcher]);
+  const rank = (t: BuildingType): number => (BUILDING_DEFS[t].unique ? 0 : FOOD.has(t) ? 1 : LATE.has(t) ? 3 : 2);
+  jobs.sort((a, b) => rank(a.b.type) - rank(b.b.type));
   for (const job of jobs) {
     // Фермы — жильцы фермы
     if (job.b.type === BuildingType.Farm) {

@@ -12,7 +12,7 @@ import { MALE_NAMES, SURNAMES } from './names';
 import { startFight } from './crime';
 import { leaveCity } from '../ai/orders';
 import { dist2 } from '../core/math';
-import { GOOD_INFO, Good } from '../economy/goods';
+import { GOOD_INFO, Good, isGood } from '../economy/goods';
 import { isWorkHour, isSleepHour } from './schedule';
 
 export interface Festival {
@@ -463,7 +463,10 @@ function protestTick(sim: Simulation): void {
           c.money += 3;
           given++;
         }
-        if (wh && (wh.storage['grain'] ?? 0) > 20) wh.storage['grain'] -= 20;
+        if (wh && (wh.storage['grain'] ?? 0) > 20) {
+          wh.storage['grain'] -= 20;
+          sim.market.flow('grain', 'роздано толпе', -20);
+        }
         sim.unrest = Math.max(0, sim.unrest - 30);
         sim.chronicle.log(sim.tick, EventKind.Social, `Бургомистр ${burg.lastName} вышел к толпе и велел раздать деньги на хлеб (${given} чел.). Народ успокаивается.`, p.x, p.y, [burg.id], 0.8);
         say(burg, 'Тише, добрые люди! Казна поможет!', 50, false, sim.tick);
@@ -485,7 +488,12 @@ function protestTick(sim: Simulation): void {
     const stalls = sim.world.buildings.filter((b) => b.type === BuildingType.MarketStall);
     const s = stalls.length ? sim.rng.pick(stalls) : null;
     if (s) {
-      for (const g of Object.keys(s.storage)) if (!g.startsWith('_') && g !== 'revenue') s.storage[g] = Math.max(0, (s.storage[g] ?? 0) * 0.5);
+      for (const g of Object.keys(s.storage)) {
+        if (g.startsWith('_') || g === 'revenue') continue;
+        const v = s.storage[g] ?? 0;
+        s.storage[g] = Math.max(0, v * 0.5);
+        if (isGood(g)) sim.market.flow(g, 'разграблено бунтовщиками', -(v - s.storage[g]), 'spoiled');
+      }
       sim.chronicle.log(sim.tick, EventKind.Crime, 'Бунтовщики разграбили торговые ряды на площади.', s.doorX, s.doorY, [], 0.7);
       s.condition = Math.max(0.3, s.condition - 0.2);
     }
@@ -614,7 +622,7 @@ function caravanTrade(sim: Simulation, leader: Citizen): void {
       else sim.treasury -= cost;
       leader.money += cost;
       wh.storage[g] = (wh.storage[g] ?? 0) + q;
-      sim.market.flow(g, 'караван привёз', q);
+      sim.market.flow(g, 'караван привёз', q, 'bought');
       sold += cost;
     }
     // купить излишки склада
@@ -628,8 +636,8 @@ function caravanTrade(sim: Simulation, leader: Citizen): void {
       const cost = Math.round(q * price);
       leader.money -= cost;
       owner.money += cost;
-      wh.storage[g] = have - q;
-      sim.market.flow(g, 'караван скупил', -q);
+      wh.storage[g] = (wh.storage[g] ?? 0) - q;
+      sim.market.flow(g, 'караван скупил', -q, 'sold');
       bought += cost;
     }
   }
@@ -819,6 +827,7 @@ function updateRaid(sim: Simulation): void {
       if (f) {
         const g = Math.floor((f.storage['grain'] ?? 0) * 0.5);
         f.storage['grain'] = (f.storage['grain'] ?? 0) - g;
+        sim.market.flow('grain', 'унесли разбойники', -g, 'spoiled');
         r.loot += g;
         sim.chronicle.log(sim.tick, EventKind.Disaster, `Разбойники разграбили ферму: унесли ${g} мер зерна.`, f.doorX, f.doorY, [], 0.8);
         for (const id of f.residents) {
@@ -862,6 +871,8 @@ function updateRaid(sim: Simulation): void {
       for (const id of r.members) {
         const b = sim.citizens[id];
         if (b.alive) {
+          for (const [k, v] of Object.entries(b.inventory)) if (v > 0 && isGood(k)) sim.market.flow(k, 'унесли разбойники', -v, 'spoiled');
+          b.inventory = {};
           b.alive = false;
           sim.moneyDestroyed += b.money;
           b.money = 0;

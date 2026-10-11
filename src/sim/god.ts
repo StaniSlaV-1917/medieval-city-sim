@@ -1,5 +1,6 @@
 // Божественные силы игрока.
 import type { Simulation } from './game';
+import type { Good } from '../economy/goods';
 import { Profession, isChild, fullName, FLAG_SICK, FLAG_INJURED } from './citizen';
 import { igniteBuilding, damageBuilding } from './fire';
 import { fallSick, die } from './health';
@@ -214,7 +215,11 @@ export function applyPower(sim: Simulation, id: string, tx: number, ty: number):
     }
     case 'drought': {
       sim.market.yearFactor = 0.35;
-      for (const b of world.buildings) if (b.type === BuildingType.Farm) b.storage['grain'] = Math.floor((b.storage['grain'] ?? 0) * 0.5);
+      for (const b of world.buildings) if (b.type === BuildingType.Farm) {
+        const was = b.storage['grain'] ?? 0;
+        b.storage['grain'] = Math.floor(was * 0.5);
+        sim.market.flow('grain', 'засуха', -(was - b.storage['grain']), 'spoiled');
+      }
       sim.chronicle.log(sim.tick, EventKind.Disaster, 'Засуха! Поля сохнут, урожая не будет. Крестьяне в отчаянии.', world.poi.cx, world.poi.cy, [], 0.9);
       sim.weather.targetRain = 0;
       sim.weather.rain = 0;
@@ -233,6 +238,7 @@ export function applyPower(sim: Simulation, id: string, tx: number, ty: number):
           if (v > 0) {
             lost += Math.floor(v * 0.5);
             b.storage[g] = v * 0.5;
+            sim.market.flow(g as Good, 'съели крысы', -v * 0.5, 'spoiled');
           }
         }
       }
@@ -273,7 +279,10 @@ export function applyPower(sim: Simulation, id: string, tx: number, ty: number):
     }
     case 'harvest': {
       sim.market.yearFactor = 1.6;
-      for (const b of world.buildings) if (b.type === BuildingType.Farm) b.storage['grain'] = (b.storage['grain'] ?? 0) + 120;
+      for (const b of world.buildings) if (b.type === BuildingType.Farm) {
+        b.storage['grain'] = (b.storage['grain'] ?? 0) + 120;
+        sim.market.flow('grain', 'благословение полей', 120);
+      }
       sim.chronicle.log(sim.tick, EventKind.Economy, 'Невиданный урожай! Амбары ломятся от зерна.', world.poi.cx, world.poi.cy, [], 0.8);
       sim.unrest = Math.max(0, sim.unrest - 15);
       return 'Поля золотятся.';
