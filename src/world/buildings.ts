@@ -144,6 +144,21 @@ export interface Building {
   underConstruction?: number;
   /** Стадия стройки: 0 фундамент, 1 каркас, 2 стены, 3 крыша */
   buildStage?: number;
+  /** Управление рабочими (фаза 14): предел рабочих, закрыто, приоритет */
+  maxWorkers?: number;
+  closed?: boolean;
+  priority?: number;
+  /** Стройка приостановлена правителем */
+  paused?: boolean;
+  /** Улучшение: по завершении стройки здание станет таким */
+  upgradeTo?: { type: BuildingType; material: Material; roof: Roof; stories: number };
+}
+
+/** Сколько работников примет здание с учётом предела правителя и закрытия (фаза 14) */
+export function workerCap(b: Building, slack = 0): number {
+  if (b.closed) return 0;
+  const base = BUILDING_DEFS[b.type].workers;
+  return b.maxWorkers !== undefined ? b.maxWorkers : base + slack;
 }
 
 export const enum District {

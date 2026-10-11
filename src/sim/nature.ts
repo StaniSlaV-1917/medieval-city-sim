@@ -2,6 +2,7 @@
 // и рыба восстанавливаются по сезонам, дичь плодится, туман рассеивается, рудознатец ищет руду.
 import type { Simulation } from './game';
 import { Tile } from '../world/tiles';
+import type { Building } from '../world/buildings';
 import { World, PropType, ResourceKind, HIDDEN_RESOURCES, idx, inBounds, isWaterTile } from '../world/world';
 import { reveal } from '../world/landscape';
 import { TICKS_PER_DAY, TICKS_PER_HOUR, Season } from '../core/time';
@@ -202,6 +203,25 @@ export function discoverNear(sim: Simulation, x: number, y: number, r: number): 
   }
   return found;
 }
+
+/** Множитель плодородия для фермы: средняя плодородность полей в радиусе работы */
+export function farmFertility(world: World, b: Building, r = 14): number {
+  let sum = 0;
+  let n = 0;
+  for (let y = b.y - r; y <= b.y + b.h + r; y++)
+    for (let x = b.x - r; x <= b.x + b.w + r; x++) {
+      if (!inBounds(world, x, y)) continue;
+      const i = idx(world, x, y);
+      if (world.tiles[i] === Tile.Field) {
+        sum += world.fertility[i];
+        n++;
+      }
+    }
+  if (!n) return 0.25;
+  // мало полей — мало урожая; 30+ тайлов — полная сила
+  return Math.min(1, n / 30) * (0.5 + sum / n) ;
+}
+
 
 /** Ежетиковое обновление природы (вызывается из Region) */
 export function updateNature(sim: Simulation): void {

@@ -4,7 +4,7 @@ import { Citizen, CitizenState, Order, OrderTarget, Trait, hasTrait, isChild, fu
 import { ACTIONS, ActionDef, ActionCtx, actFor, goTo, goToBuilding, enterBuilding, say, think, remember } from './actions';
 import { startTalk } from './talk';
 import { interrupt, makeCtx } from './brain';
-import { BuildingType, BUILDING_DEFS, Building } from '../world/buildings';
+import { BuildingType, BUILDING_DEFS, Building, workerCap } from '../world/buildings';
 import { EventKind } from '../events/chronicle';
 import { Good, GOOD_INFO } from '../economy/goods';
 import { sellersOf } from '../economy/market';
@@ -248,7 +248,7 @@ export const orderAction: ActionDef = {
       case 'profession': {
         let b = targetBuilding(sim, o);
         if (!b || !BUILDING_DEFS[b.type].workers) {
-          const cands = sim.world.buildings.filter((x) => BUILDING_DEFS[x.type].workers > 0 && x.workers.length < BUILDING_DEFS[x.type].workers + 1 && x.id !== c.workplace && x.type !== BuildingType.Castle);
+          const cands = sim.world.buildings.filter((x) => BUILDING_DEFS[x.type].workers > 0 && x.workers.length < workerCap(x, 1) && x.id !== c.workplace && x.type !== BuildingType.Castle && x.underConstruction === undefined);
           if (!cands.length) return false;
           b = rng.pick(cands);
           o.target = { kind: 'building', id: b.id, x: b.doorX, y: b.doorY };
@@ -421,7 +421,7 @@ export const orderAction: ActionDef = {
         const b = targetBuilding(sim, o);
         if (!b) return finishOrder(ctx);
         const def = BUILDING_DEFS[b.type];
-        if (b.workers.length >= def.workers + 1) {
+        if (b.workers.length >= workerCap(b, 1)) {
           say(c, 'Мест нет, сказали.', 40, false, sim.tick);
           return finishOrder(ctx, `Пытался${c.sex === 'f' ? 'ась' : ''} наняться (${def.name.toLowerCase()}), но мест не было.`);
         }

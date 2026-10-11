@@ -24,6 +24,7 @@ export interface BubbleOpts {
 import { drawWeather } from './weather';
 import { getAnimalSprite } from './animalSprites';
 import { drawOverlay, drawFog, OverlayMode } from './overlays';
+import type { BuildPreview } from '../ui/buildMode';
 import { AnimalKind } from '../sim/animals';
 
 interface Drawable {
@@ -62,6 +63,8 @@ export class Renderer {
   private bg: CanvasRenderingContext2D;
   dpr = 1;
   bubbleOpts: BubbleOpts = { density: 1, favorites: [], topInset: 44, bottomInset: 48, obstacles: [] };
+  /** Превью строительства (фаза 14) */
+  preview: BuildPreview | null = null;
   hoverCitizen = -1;
   /** Отладочная информация */
   debug = { drawn: 0, lights: 0 };
@@ -165,6 +168,7 @@ export class Renderer {
     this.drawFires(g, dt);
     this.drawDragon(g);
     drawOverlay(g, this, sim, view);
+    this.drawPreview(g, snow);
     drawFog(g, sim, view);
     // Ночное освещение
     this.drawLighting(light, view, z, ox, oy);
@@ -251,6 +255,49 @@ export class Renderer {
       const cy = c.py + (c.y - c.py) * a;
       if (cx < tx0 - 1 || cx > tx1 + 1 || cy < ty0 - 1 || cy > ty1 + 1) continue;
       out.push({ y: (cy + 0.5) * TILE + 0.1, kind: 2, ref: i });
+    }
+  }
+
+  /** Призрак постройки, подсветка тайлов, радиусы */
+  private drawPreview(g: CanvasRenderingContext2D, snow: boolean): void {
+    const pv = this.preview;
+    if (!pv) return;
+    for (const c of pv.circles) {
+      g.strokeStyle = c.color;
+      g.lineWidth = 2;
+      g.setLineDash([6, 4]);
+      g.beginPath();
+      g.arc(c.x * TILE, c.y * TILE, c.r * TILE, 0, Math.PI * 2);
+      g.stroke();
+      g.setLineDash([]);
+      g.fillStyle = c.color.replace(/[\d.]+\)$/, '0.07)');
+      g.fill();
+    }
+    for (const t of pv.tiles) {
+      g.fillStyle = t.ok ? 'rgba(80,220,100,0.35)' : 'rgba(230,60,40,0.45)';
+      g.fillRect(t.x * TILE + 1, t.y * TILE + 1, TILE - 2, TILE - 2);
+    }
+    if (pv.rect) {
+      g.strokeStyle = 'rgba(255,230,120,0.9)';
+      g.lineWidth = 2;
+      g.setLineDash([4, 3]);
+      g.strokeRect(pv.rect.x0 * TILE + 1, pv.rect.y0 * TILE + 1, (pv.rect.x1 - pv.rect.x0 + 1) * TILE - 2, (pv.rect.y1 - pv.rect.y0 + 1) * TILE - 2);
+      g.setLineDash([]);
+      g.fillStyle = 'rgba(255,230,120,0.12)';
+      g.fillRect(pv.rect.x0 * TILE, pv.rect.y0 * TILE, (pv.rect.x1 - pv.rect.x0 + 1) * TILE, (pv.rect.y1 - pv.rect.y0 + 1) * TILE);
+    }
+    if (pv.ghost) {
+      const b = pv.ghost.b;
+      const s = getBuildingSprite(b, snow);
+      g.globalAlpha = 0.6;
+      g.drawImage(s.canvas, b.x * TILE + s.ox, b.y * TILE + s.oy);
+      g.globalAlpha = 0.25;
+      g.fillStyle = pv.ghost.ok ? '#60ff80' : '#ff4040';
+      g.fillRect(b.x * TILE + s.ox, b.y * TILE + s.oy, s.canvas.width, s.canvas.height);
+      g.globalAlpha = 1;
+      // дверь
+      g.fillStyle = 'rgba(255,230,120,0.9)';
+      g.fillRect(b.doorX * TILE + 5, b.doorY * TILE + 5, 6, 6);
     }
   }
 

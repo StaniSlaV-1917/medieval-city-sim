@@ -14,6 +14,7 @@ import { fullName } from '../sim/citizen';
 import { EDICT_DEFS } from '../data/edicts';
 import { DEV_NODES } from '../data/development';
 import { esc } from './topbar';
+import { queueMove, setUrgent, setPaused, demolishBuilding } from '../sim/build';
 
 abstract class WinPanel {
   el: HTMLElement;
@@ -104,6 +105,20 @@ export class DevelopmentPanel extends WinPanel {
     super(win, game);
     this.el.classList.add('development');
     this.el.addEventListener('click', (e) => {
+      const qa = (e.target as HTMLElement).closest<HTMLElement>('[data-q]');
+      if (qa) {
+        const id = Number(qa.dataset.id);
+        const sim = this.game.sim;
+        switch (qa.dataset.q) {
+          case 'up': queueMove(sim, id, -1); break;
+          case 'down': queueMove(sim, id, 1); break;
+          case 'urgent': setUrgent(sim, id); break;
+          case 'pause': setPaused(sim, id, !sim.world.buildings[id]?.paused); break;
+          case 'demolish': demolishBuilding(sim, id); break;
+        }
+        this.render();
+        return;
+      }
       const t = (e.target as HTMLElement).closest<HTMLElement>('[data-building]');
       if (!t) return;
       const id = Number(t.dataset.building);
@@ -127,9 +142,11 @@ export class DevelopmentPanel extends WinPanel {
       .sort((a, b) => b[1] - a[1])
       .map(([t, n]) => `<span class="chip">${BUILDING_DEFS[t].name} <b>${n}</b></span>`)
       .join('');
-    const sitesHtml = sites.length
-      ? sites.map((b) => `<div class="row2 link" data-building="${b.id}"><span>${BUILDING_DEFS[b.type].name}</span><span class="muted">${STAGE_NAMES[b.buildStage ?? 0]}, ${Math.round((b.underConstruction ?? 0) * 100)}%</span></div>`).join('')
-      : '<div class="muted">сейчас ничего не строится</div>';
+    const q = sim.construction.queue.map((id) => sim.world.buildings[id]).filter((b) => b && b.w > 0 && b.underConstruction !== undefined);
+    const sitesHtml = q.length
+      ? q.map((b) => `<div class="row2 qrow"><span class="link" data-building="${b.id}">${b.priority === 2 ? '⚡ ' : ''}${BUILDING_DEFS[b.type].name}${b.upgradeTo ? ' (улучшение)' : ''}${b.paused ? ' <span class="bad">пауза</span>' : ''}</span><span class="muted">${STAGE_NAMES[b.buildStage ?? 0]} ${Math.round((b.underConstruction ?? 0) * 100)}%</span><span class="qb"><button class="wb" data-q="up" data-id="${b.id}" data-tip="Выше в очереди">▲</button><button class="wb" data-q="down" data-id="${b.id}" data-tip="Ниже">▼</button><button class="wb" data-q="urgent" data-id="${b.id}" data-tip="Срочно">⚡</button><button class="wb" data-q="pause" data-id="${b.id}" data-tip="Пауза">❚❚</button><button class="wb" data-q="demolish" data-id="${b.id}" data-tip="Снести">✕</button></span></div>`).join('')
+      : '<div class="muted">сейчас ничего не строится — откройте панель строительства внизу (B)</div>';
+    void sites;
     const st = sim.stats;
     this.el.innerHTML = `
       <div class="sub">Город растёт сам: приезжие селятся, когда есть жильё и работа; новые дома ставят, когда хватает досок и казны. Дерево развития появится позже.</div>

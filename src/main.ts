@@ -24,6 +24,7 @@ import { Toasts } from './ui/toasts';
 import { loadSettings, saveSettings, UiSettings } from './ui/settings';
 import { EdictsPanel, DevelopmentPanel, TradePanel, RegionPanel, SettingsPanel } from './ui/panels';
 import { Subtitles } from './ui/subtitles';
+import { BuildMode } from './ui/buildMode';
 import { ChronicleEvent, EventKind } from './events/chronicle';
 
 /** Панель, живущая внутри окна */
@@ -50,6 +51,7 @@ export class Game {
   buildbar: BuildBar;
   toasts: Toasts;
   subtitles: Subtitles;
+  build: BuildMode;
   settings: UiSettings;
   /** За кем следит камера (для субтитров) */
   followId = -1;
@@ -77,6 +79,7 @@ export class Game {
     this.ui = ui;
     this.sim = loaded ?? new Simulation({ seedText: seed, size, fog });
     this.settings = loadSettings();
+    this.build = new BuildMode(this);
     this.renderer = new Renderer(canvas, this.sim);
     this.windows = new WindowManager(ui);
     // Постоянные элементы
@@ -248,8 +251,13 @@ export class Game {
     this.side.hide();
   }
 
-  /** Esc: сначала отмена прицеливания, потом верхнее окно, потом снятие выбора */
+  /** Esc: сначала отмена прицеливания/стройки, потом верхнее окно, потом снятие выбора */
   escape(): void {
+    if (this.build.active) {
+      this.build.cancel();
+      this.buildbar.update();
+      return;
+    }
     if (this.godTargeting || this.targeting) {
       this.deselect();
       return;
@@ -303,6 +311,10 @@ export class Game {
   onRightClick(sx: number, sy: number): void {
     void sx;
     void sy;
+    if (this.build.active) {
+      this.build.cancel();
+      this.buildbar.update();
+    }
   }
 
   panTo(tx: number, ty: number): void {
@@ -342,7 +354,8 @@ export class Game {
     this.sim.focusY = cam.y / TILE;
     this.input.update(dt);
     cam.update(dt);
-    this.renderer.canvas.style.cursor = this.targeting || this.godTargeting ? 'crosshair' : 'default';
+    this.renderer.canvas.style.cursor = this.targeting || this.godTargeting || this.build.active ? 'crosshair' : 'default';
+    this.renderer.preview = this.build.active && !this.input.overUi ? this.build.preview : null;
     const bo = this.renderer.bubbleOpts;
     bo.density = this.settings.bubbleDensity;
     bo.favorites = this.sim.favorites;
@@ -438,6 +451,11 @@ export class Game {
     const sx = this.input.mouseX;
     const sy = this.input.mouseY;
     if (this.input.overUi || this.tooltip.uiActive) {
+      this.renderer.hoverCitizen = -1;
+      this.tooltip.hideMap();
+      return;
+    }
+    if (this.build.active) {
       this.renderer.hoverCitizen = -1;
       this.tooltip.hideMap();
       return;

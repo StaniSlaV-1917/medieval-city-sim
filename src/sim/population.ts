@@ -3,7 +3,7 @@ import type { Simulation } from './game';
 import { Citizen, CitizenState, Profession, Trait, Sex, Appearance, isChild, isElder } from './citizen';
 import { MALE_NAMES, FEMALE_NAMES, SURNAMES } from './names';
 import { professionForWorkplace } from '../data/professions';
-import { BuildingType, BUILDING_DEFS, Building, District } from '../world/buildings';
+import { BuildingType, BUILDING_DEFS, Building, District, workerCap } from '../world/buildings';
 import { RNG } from '../core/rng';
 import { TICKS_PER_YEAR } from '../core/time';
 
@@ -489,7 +489,7 @@ function assignProfessions(sim: Simulation, rng: RNG): void {
       c.profession = Profession.Beggar;
       continue;
     }
-    const farm = farms.find((f) => f.workers.length < BUILDING_DEFS[f.type].workers + 2);
+    const farm = farms.find((f) => f.workers.length < workerCap(f, 2));
     if (farm && r < 0.6) {
       assignJob(sim, c, farm, Profession.Farmer);
       continue;

@@ -263,7 +263,13 @@ kbd { background: #fbf6ea; border: 1px solid var(--border); border-radius: 3px; 
 #chron.collapsed .ch-head { position: absolute; right: 4px; top: 1px; }
 
 /* ---------- Панель строительства (внизу по центру) ---------- */
-#buildbar { position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); display: flex; gap: 4px; align-items: center; padding: 4px 10px; z-index: 40; white-space: nowrap; }
+#buildbar { position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); display: flex; flex-direction: column; gap: 4px; align-items: stretch; padding: 4px 10px; z-index: 40; white-space: nowrap; max-width: 92vw; }
+#buildbar .tabs { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; justify-content: center; }
+#buildbar .items { display: none; gap: 4px; flex-wrap: wrap; justify-content: center; padding-bottom: 4px; border-bottom: 1px solid var(--border); }
+#buildbar .items .bi { font-size: 12px; padding: 3px 8px; }
+#buildbar .hint { font-size: 12px; color: var(--ink-soft); padding: 2px 4px; white-space: normal; text-align: center; max-width: 900px; margin: 0 auto; }
+.win .qrow .qb { display: flex; gap: 1px; }
+.win .qrow .qb .wb { font-size: 10px; padding: 0 3px; }
 #buildbar .bt { font-size: 12px; font-variant: small-caps; color: var(--ink-soft); margin-right: 4px; display: flex; align-items: center; gap: 4px; }
 #buildbar .bc { display: flex; align-items: center; gap: 4px; padding: 3px 8px; font-size: 12px; }
 #buildbar .bc img { width: 14px; height: 14px; image-rendering: pixelated; }

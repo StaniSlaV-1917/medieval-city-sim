@@ -129,6 +129,7 @@ export function serialize(sim: Simulation): string {
     dragon: sim.dragon,
     guardTarget: sim.guardTarget,
     region: { prospector: sim.region.prospector, prospectUntil: sim.region.prospectUntil },
+    buildQueue: sim.construction.queue,
     favorites: sim.favorites,
     famine: sim.famine,
     pendingWedding: sim.pendingWedding,
@@ -224,6 +225,7 @@ export function deserialize(json: string): Simulation {
   const reg = (d.region ?? {}) as Plain;
   sim.region.prospector = typeof reg.prospector === 'number' ? reg.prospector : -1;
   sim.region.prospectUntil = typeof reg.prospectUntil === 'number' ? reg.prospectUntil : 0;
+  sim.construction.queue = Array.isArray(d.buildQueue) ? (d.buildQueue as number[]) : sim.world.buildings.filter((b) => b.w > 0 && b.underConstruction !== undefined).map((b) => b.id);
   sim.famine = d.famine === true;
   sim.pendingWedding = d.pendingWedding as typeof sim.pendingWedding;
   sim.buildingVersion = (d.buildingVersion as number) + 1;

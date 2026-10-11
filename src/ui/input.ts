@@ -10,6 +10,7 @@ export class Input {
   mouseY = 0;
   /** Курсор над элементом интерфейса (не над картой) */
   overUi = true;
+  private buildDrag = false;
   private game: Game;
 
   constructor(game: Game, canvas: HTMLCanvasElement) {
@@ -23,6 +24,11 @@ export class Input {
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
     window.addEventListener('blur', () => this.keys.clear());
     canvas.addEventListener('mousedown', (e) => {
+      if (e.button === 0 && game.build.active) {
+        this.buildDrag = true;
+        game.build.onDown(e.clientX, e.clientY);
+        return;
+      }
       if (e.button === 0 || e.button === 1 || e.button === 2) {
         this.dragging = true;
         this.dragMoved = false;
@@ -35,6 +41,10 @@ export class Input {
       this.mouseY = e.clientY;
       const t = e.target as HTMLElement | null;
       this.overUi = !!t && t !== canvas;
+      if (game.build.active && !this.overUi) {
+        if (this.buildDrag) game.build.onDrag(e.clientX, e.clientY);
+        else game.build.onMove(e.clientX, e.clientY);
+      }
       if (this.dragging) {
         const dx = e.clientX - this.lastX;
         const dy = e.clientY - this.lastY;
@@ -50,6 +60,11 @@ export class Input {
       }
     });
     window.addEventListener('mouseup', (e) => {
+      if (this.buildDrag && e.button === 0) {
+        this.buildDrag = false;
+        game.build.onUp(e.clientX, e.clientY);
+        return;
+      }
       if (!this.dragging) return;
       this.dragging = false;
       if (!this.dragMoved && e.button === 0) game.onClick(e.clientX, e.clientY);
@@ -60,6 +75,11 @@ export class Input {
       'wheel',
       (e) => {
         e.preventDefault();
+        if (game.build.active && e.shiftKey) {
+          game.build.setBrush(game.build.brush + (e.deltaY < 0 ? 1 : -1));
+          game.build.updatePreview();
+          return;
+        }
         const f = e.deltaY < 0 ? 1.18 : 1 / 1.18;
         game.renderer.camera.zoomAt(f, e.clientX, e.clientY);
       },
@@ -100,7 +120,11 @@ export class Input {
         g.openWindow('edicts');
         break;
       case 'KeyR':
-        g.openWindow('development');
+        if (g.build.active) g.build.rotate();
+        else g.openWindow('development');
+        break;
+      case 'KeyB':
+        g.buildbar.toggle();
         break;
       case 'KeyY':
         g.openWindow('trade');

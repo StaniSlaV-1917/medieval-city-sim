@@ -7,6 +7,8 @@ export class ConstructionSystem {
   /** Версии для перерисовки (здания/тайлы) */
   buildingVersion = 0;
   tileVersion = 0;
+  /** Очередь строек (id зданий) в порядке приоритета */
+  queue: number[] = [];
 
   update(sim: Simulation): void {
     updateConstruction(sim);

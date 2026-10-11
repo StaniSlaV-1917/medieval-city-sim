@@ -150,11 +150,12 @@ function buildSprite(b: Building, snow: boolean): BuildingSprite {
   const W = b.w * T;
   const Hfoot = b.h * T;
   const extra = b.type === BuildingType.Cathedral ? 26 : b.type === BuildingType.TownHall ? 16 : b.type === BuildingType.Castle ? 14 : b.type === BuildingType.FireTower ? 10 : 8;
-  const SW = W + 2;
+  const side = b.facing === 1 || b.facing === 3 ? 8 : 0;
+  const SW = W + 2 + side * 2;
   const SH = Hfoot + wallH + extra;
   const cv = makeCanvas(SW, SH);
   const g = ctx2d(cv);
-  const ox = -1;
+  const ox = -1 - side;
   const oy = -(wallH + extra);
   const sprite: BuildingSprite = { canvas: cv, ox, oy, lights: [], chimney: null, wallH };
   const v = (k: number) => hash2(b.variant, k, b.id);
@@ -433,8 +434,9 @@ function drawSign(d: D, x: number, y: number, type: BuildingType): void {
 
 function drawGeneric(d: D): void {
   const { g, b, v, SW, SH, W, wallH, facadeY, roofY0, roofY1, snow } = d;
-  const x0 = 1;
-  const x1 = 1 + W;
+  const side = b.facing === 1 || b.facing === 3 ? 8 : 0;
+  const x0 = 1 + side;
+  const x1 = x0 + W;
   // Специальные: мельница — каменный низ, деревянный верх
   const mat = b.material;
   // Тень под зданием (на земле)
@@ -470,12 +472,32 @@ function drawGeneric(d: D): void {
       g.fillRect(cx - 2, roofY0 - 1, 7, 2);
     }
   }
-  // Дверь: в столбце doorX
-  const doorCol = b.doorX - b.x;
+  // Дверь: в столбце doorX (фасад на юг) или на боковой/задней стене при другой ориентации
+  const facing = b.facing ?? 0;
+  const doorCol = facing === 0 || facing === 2 ? Math.max(0, Math.min(b.w - 1, b.doorX - b.x)) : Math.floor(b.w / 2);
   const doorX = x0 + doorCol * TILE + 5;
   const doorW = b.type === BuildingType.Tavern || b.type === BuildingType.Stable || b.type === BuildingType.Barracks || b.type === BuildingType.Warehouse ? 8 : 6;
   const doorH = Math.min(wallH - 1, 8 + (b.stories - 1) * 1);
-  if (b.type === BuildingType.Smithy) {
+  if (facing !== 0) {
+    // боковая дверь: крыльцо с навесом у края; задняя — тёмный проём над коньком
+    const doorRow = b.doorY - b.y;
+    if (facing === 1 || facing === 3) {
+      const px = facing === 1 ? x0 - 7 : x1 + 1;
+      const py = facadeY + Math.min(wallH - 1, 2 + Math.max(0, Math.min(b.h - 1, doorRow)) * 2);
+      g.fillStyle = rgb(MATERIAL_COLORS[mat].wall);
+      g.fillRect(px, py - 9, 7, 9);
+      g.fillStyle = rgb(ROOF_COLORS[b.roof].dark);
+      g.fillRect(px - 1, py - 12, 9, 3);
+      drawDoor(d, px + 1, py, 5, 7, false);
+      g.fillStyle = 'rgba(0,0,0,0.2)';
+      g.fillRect(px - 1, py, 9, 1);
+    } else {
+      g.fillStyle = '#2a1a0e';
+      g.fillRect(doorX, roofY0 + 1, doorW, 4);
+      g.fillStyle = '#5a3d22';
+      g.fillRect(doorX + 1, roofY0 + 2, doorW - 2, 2);
+    }
+  } else if (b.type === BuildingType.Smithy) {
     // открытый проём с горном
     g.fillStyle = '#1e1612';
     g.fillRect(doorX - 2, facadeY + 1, 10, wallH - 1);
@@ -492,7 +514,7 @@ function drawGeneric(d: D): void {
   for (let r = 0; r < rows; r++) {
     const wy = facadeY + 2 + r * 8;
     for (let c = 0; c < b.w; c++) {
-      if (c === doorCol && r === rows - 1) continue;
+      if (c === doorCol && r === rows - 1 && facing === 0) continue;
       if (hash2(c, r, b.variant) < 0.25 && b.w > 2) continue;
       const wx = x0 + c * TILE + 6;
       drawWindow(d, wx, wy, 4, 5, b.type === BuildingType.Prison);

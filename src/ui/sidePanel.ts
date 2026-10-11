@@ -10,6 +10,10 @@ import { FIRE_LABELS } from '../sim/fire';
 import { EVENT_LABELS } from '../sim/cityEvents';
 import { BUILD_LABELS } from '../sim/construction';
 import { PROSPECT_LABELS } from '../sim/prospect';
+import { hireWorker, fireWorker, setMaxWorkers, setClosed, demolishBuilding, upgradeBuilding, upgradePlan, setPaused, setUrgent, materialsLeft } from '../sim/build';
+import { STAGE_NAMES } from '../sim/construction';
+import { costText } from '../data/buildCatalog';
+import { esc } from './topbar';
 import { moodWord } from '../sim/needs';
 import { ORDER_DEFS, ORDER_CATEGORIES, giveOrder, OrderDef } from '../ai/orders';
 import { GOODS, GOOD_INFO } from '../economy/goods';
@@ -62,6 +66,11 @@ export class SidePanel {
         this.game.selectBuilding(Number(bid));
       }
       if (t.id === 'follow') this.game.toggleFollow();
+      const bact = t.getAttribute('data-bact');
+      if (bact && this.mode === 'building') {
+        this.buildingAction(bact);
+        return;
+      }
       const cat = t.getAttribute('data-cat') as OrderDef['category'] | null;
       if (cat) {
         this.orderCat = this.orderCat === cat ? null : cat;
@@ -411,10 +420,36 @@ export class SidePanel {
     return `<span class="link" data-citizen="${id}">${fullName(c)}</span>`;
   }
 
+  /** Кнопки управления зданием (фаза 14) */
+  private buildingAction(act: string): void {
+    const sim = this.game.sim;
+    const b = sim.world.buildings[this.id];
+    if (!b) return;
+    switch (act) {
+      case 'hire': this.reaction = hireWorker(sim, b); break;
+      case 'fire': this.reaction = fireWorker(sim, b); break;
+      case 'max+': setMaxWorkers(sim, b, (b.maxWorkers ?? BUILDING_DEFS[b.type].workers) + 1); this.reaction = `Предел рабочих: ${b.maxWorkers}.`; break;
+      case 'max-': setMaxWorkers(sim, b, (b.maxWorkers ?? BUILDING_DEFS[b.type].workers) - 1); this.reaction = `Предел рабочих: ${b.maxWorkers}.`; break;
+      case 'close': setClosed(sim, b, !b.closed); this.reaction = b.closed ? 'Здание закрыто.' : 'Здание открыто.'; break;
+      case 'prio': b.priority = b.priority === 1 ? 0 : 1; this.reaction = b.priority ? 'Высокий приоритет снабжения.' : 'Обычный приоритет.'; break;
+      case 'demolish': {
+        const msg = demolishBuilding(sim, b.id);
+        this.reaction = msg;
+        this.game.deselect();
+        this.game.toasts.show(msg, 0);
+        return;
+      }
+      case 'upgrade': this.reaction = upgradeBuilding(sim, b.id); break;
+      case 'pause': setPaused(sim, b.id, !b.paused); this.reaction = b.paused ? 'Стройка приостановлена.' : 'Стройка продолжается.'; break;
+      case 'urgent': setUrgent(sim, b.id); this.reaction = b.priority === 2 ? 'Срочная стройка — первая в очереди.' : 'Обычная очередь.'; break;
+    }
+    this.renderBuilding();
+  }
+
   private renderBuilding(): void {
     const sim = this.game.sim;
     const b = sim.world.buildings[this.id];
-    if (!b) return this.hide();
+    if (!b || b.w <= 0) return this.hide();
     const def = BUILDING_DEFS[b.type];
     const residents = b.residents.filter((id) => sim.citizens[id]?.alive).map((id) => this.link(id)).join(', ');
     const workers = b.workers.filter((id) => sim.citizens[id]?.alive).map((id) => this.link(id)).join(', ');
@@ -432,9 +467,26 @@ export class SidePanel {
         <div>Владелец: ${owner}</div>
         ${def.hours ? `<div>Часы работы: ${def.workers ? `${def.hours[0]}:00–${def.hours[1] % 24}:00` : '—'}</div>` : ''}
       </div>
+      ${b.underConstruction !== undefined ? this.siteHtml(b) : ''}
       ${def.home ? `<div class="section"><h3>Жильцы (${b.residents.length}/${def.capacity})</h3>${residents || 'никто не живёт'}</div>` : ''}
-      ${def.workers ? `<div class="section"><h3>Работники (${b.workers.length}/${def.workers})</h3>${workers || 'никого'}</div>` : ''}
-      <div class="section"><h3>Запасы</h3>${storage || 'пусто'}${revenue}</div>`;
+      ${def.workers && b.underConstruction === undefined ? `<div class="section"><h3>Работники (${b.workers.length}/${b.maxWorkers ?? def.workers})</h3>${workers || 'никого'}
+        <div class="actions"><button class="btn small" data-bact="hire" data-tip="Нанять безработного">+ рабочий</button><button class="btn small" data-bact="fire" data-tip="Уволить последнего">− рабочий</button><button class="btn small" data-bact="max-" data-tip="Меньше мест">предел −</button><button class="btn small" data-bact="max+" data-tip="Больше мест">предел +</button><button class="btn small ${b.closed ? 'active' : ''}" data-bact="close">${b.closed ? 'Открыть' : 'Закрыть'}</button><button class="btn small ${b.priority === 1 ? 'active' : ''}" data-bact="prio" data-tip="Приоритет снабжения">Приоритет</button></div></div>` : ''}
+      <div class="section"><h3>Запасы</h3>${storage || 'пусто'}${revenue}</div>
+      <div class="section"><h3>Правитель</h3><div class="actions">${upgradePlan(b) && b.underConstruction === undefined ? `<button class="btn small" data-bact="upgrade" data-tip="${esc(`${upgradePlan(b)!.label}: ${costText(upgradePlan(b)!.cost, upgradePlan(b)!.money)}`)}">Улучшить (${upgradePlan(b)!.label})</button>` : ''}${b.type !== BuildingType.Castle ? '<button class="btn small bad" data-bact="demolish" data-tip="Снести с возвратом половины материалов">Снести</button>' : ''}</div></div>
+      ${this.reaction ? `<div class="reaction">${this.reaction}</div>` : ''}`;
+  }
+
+  private siteHtml(b: Building): string {
+    const left = materialsLeft(b);
+    const need = (g: string): string => `${Math.round(b.storage[`_got_${g}`] ?? 0)}/${Math.round(b.storage[`_need_${g}`] ?? 0)}`;
+    const mats = ['planks', 'stone', 'wood'].filter((g) => (b.storage[`_need_${g}`] ?? 0) > 0).map((g) => `${g === 'planks' ? 'доски' : g === 'stone' ? 'камень' : 'брёвна'} ${need(g)}`).join(' · ');
+    const q = this.game.sim.construction.queue.indexOf(b.id);
+    const builders = this.game.sim.citizens.filter((c) => c.alive && c.action === 'build' && c.actionData.site === b.id).length;
+    return `<div class="section"><h3>Стройка${b.upgradeTo ? ' (улучшение)' : ''}</h3>
+      <div class="bar"><span class="name">${STAGE_NAMES[b.buildStage ?? 0]}</span><div class="track"><div class="fill" style="width:${Math.round((b.underConstruction ?? 0) * 100)}%"></div></div><span class="val">${Math.round((b.underConstruction ?? 0) * 100)}</span></div>
+      <div>Материалы на площадке: ${mats || 'не нужны'}${Object.keys(left).length ? '' : ' <span class="good">(всё доставлено)</span>'}</div>
+      <div>Строителей сейчас: ${builders} · место в очереди: ${q >= 0 ? q + 1 : '—'}${b.paused ? ' · <b class="bad">пауза</b>' : ''}${b.priority === 2 ? ' · <b>срочно</b>' : ''}</div>
+      <div class="actions"><button class="btn small ${b.priority === 2 ? 'active' : ''}" data-bact="urgent">Срочно</button><button class="btn small ${b.paused ? 'active' : ''}" data-bact="pause">${b.paused ? 'Продолжить' : 'Пауза'}</button></div></div>`;
   }
 }
 

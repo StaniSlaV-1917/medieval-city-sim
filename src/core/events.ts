@@ -29,6 +29,9 @@ export interface SimEvents {
   famine: { active: boolean; avgHunger: number };
   /** Рудознатец нашёл скрытый ресурс */
   'resource:found': { kind: number; x: number; y: number };
+  /** Стройка правителя заложена / снесена */
+  'build:placed': { id: number; type: number };
+  'build:demolished': { id: number; type: number };
 }
 
 type Handler<T> = (payload: T) => void;

@@ -16,6 +16,10 @@ import { Pathfinder } from '../src/world/pathfinding';
 import { hireProspector } from '../src/sim/prospect';
 import { PropType } from '../src/world/world';
 import { Tile } from '../src/world/tiles';
+import { catalogItem } from '../src/data/buildCatalog';
+import { checkPlace, placeBuilding, buildRoad, snappedLine, paintZone, placePlot, demolishBuilding, upgradeBuilding, hireWorker, fireWorker, setMaxWorkers, setClosed, farmFertility, doorFor, materialAvailable } from '../src/sim/build';
+import { BuildingType } from '../src/world/buildings';
+import { idx as tileIndex, isRoadTile } from '../src/world/world';
 import { dialogueLineCount } from '../src/ai/dialogue';
 import { layoutBubbles, BubbleItem } from '../src/render/bubbleLayout';
 import { RNG } from '../src/core/rng';
@@ -233,6 +237,97 @@ for (const c of cases) {
   let same = true;
   for (let i = 0; i < world.resource.length; i += 97) if (again.world.resource[i] !== world.resource[i] || again.world.resourceAmount[i] !== world.resourceAmount[i] || again.world.explored[i] !== world.explored[i]) same = false;
   check(same && again.world.parcels.length === world.parcels.length && again.world.fog, 'природные данные и туман не сохраняются');
+}
+
+// ---------------------------------------------------------------- Панель строительства (фаза 14)
+{
+  console.log('\n=== Строительство: размещение, дороги, зоны, участки, снос, улучшение, рабочие, бот-строитель ===');
+  const sim = new Simulation({ seedText: 'стройка', size: 'medium' });
+  const world = sim.world;
+  sim.treasury += 3000;
+  const wh = world.buildings.find((b) => b.type === BuildingType.Warehouse)!;
+  check(!!wh, 'в городе нет склада');
+  wh.storage.planks = (wh.storage.planks ?? 0) + 120;
+  wh.storage.stone = (wh.storage.stone ?? 0) + 120;
+  // Лесопилка: нужна рядом с лесом; ищем место у опушки
+  const saw = catalogItem('sawmill')!;
+  let site: { x: number; y: number } | null = null;
+  for (let y = 4; y < world.h - 8 && !site; y++)
+    for (let x = 4; x < world.w - 8 && !site; x++) {
+      let forest = false;
+      for (let dy = -6; dy <= 6 && !forest; dy++) for (let dx = -6; dx <= 6; dx++) if (world.tiles[tileIndex(world, x + dx, y + dy)] === Tile.Forest) forest = true;
+      if (!forest) continue;
+      const chk = checkPlace(sim, saw, x, y, 0);
+      if (chk.ok && Math.hypot(x - world.poi.cx, y - world.poi.cy) < 60) site = { x, y };
+    }
+  check(!!site, 'не нашлось места под лесопилку у леса');
+  const sawB = site ? placeBuilding(sim, saw, site.x, site.y, 0) : null;
+  check(!!sawB && sawB.underConstruction === 0 && sim.construction.queue.includes(sawB.id), 'лесопилка не заложена или не в очереди');
+  // Ориентации: дверь по сторонам света
+  const d1 = doorFor(10, 10, 3, 3, 1);
+  const d3 = doorFor(10, 10, 3, 3, 3);
+  check(d1.x === 9 && d3.x === 13, `дверь при ориентации запад/восток: ${d1.x}, ${d3.x}`);
+  // Дорога: тропа от площади на восток, мощёная — рядом
+  const px0 = world.poi.square.x + world.poi.square.w + 2;
+  const py0 = world.poi.square.y + 2;
+  const line = snappedLine(px0, py0, px0 + 12, py0 + 3);
+  check(line.every((p, i) => i === 0 || Math.abs(p.x - line[i - 1].x) + Math.abs(p.y - line[i - 1].y) <= 1), 'линия дороги не 4-связная');
+  const nPath = buildRoad(sim, snappedLine(world.poi.gates[0].x + 2, world.poi.gates[0].y + 2, world.poi.gates[0].x + 14, world.poi.gates[0].y + 2), false);
+  const stone0 = materialAvailable(sim, 'stone');
+  const nRoad = buildRoad(sim, snappedLine(world.poi.gates[0].x + 2, world.poi.gates[0].y + 4, world.poi.gates[0].x + 10, world.poi.gates[0].y + 4), true);
+  check(nPath >= 5 || nRoad >= 5, `дороги не прокладываются: тропа ${nPath}, мощёная ${nRoad}`);
+  check(nRoad === 0 || materialAvailable(sim, 'stone') < stone0, 'мощёная дорога не берёт камень со складов');
+  // Зона поля у фермы и плодородие
+  const farm = world.buildings.find((b) => b.type === BuildingType.Farm)!;
+  const f0 = farmFertility(world, farm);
+  const painted = paintZone(sim, 'field', farm.x - 6, farm.y - 6, 3);
+  const f1 = farmFertility(world, farm);
+  check(painted > 0 && f1 > 0.3, `поле не рисуется или не влияет на ферму (${painted} тайлов, ${f0.toFixed(2)} → ${f1.toFixed(2)})`);
+  // Жилой участок вдоль новой тропы
+  const gx = world.poi.gates[0].x;
+  const gy = world.poi.gates[0].y;
+  const plot = placePlot(sim, gx + 3, gy + 5, gx + 13, gy + 9);
+  check(plot.length >= 1, `жилой участок не дал домов (${plot.length})`);
+  // Снос лачуги с переселением
+  const shack = world.buildings.find((b) => b.type === BuildingType.Shack && b.residents.length > 0)!;
+  const res0 = shack.residents.slice();
+  const shackId = shack.id;
+  demolishBuilding(sim, shackId);
+  check(shack.w === 0 && res0.every((id) => sim.citizens[id].home !== shackId), 'после сноса жильцы остались привязаны к лачуге');
+  check(world.buildingAt[tileIndex(world, shack.x, shack.y)] === -1, 'тайлы снесённого здания не освобождены');
+  // Улучшение другой лачуги
+  const shack2 = world.buildings.find((b) => b.type === BuildingType.Shack && b.w > 0)!;
+  const upMsg = upgradeBuilding(sim, shack2.id);
+  check(shack2.upgradeTo !== undefined && shack2.underConstruction === 0, `улучшение не началось: ${upMsg}`);
+  // Рабочие
+  const bakery = world.buildings.find((b) => b.type === BuildingType.Bakery)!;
+  const w0 = bakery.workers.length;
+  setMaxWorkers(sim, bakery, w0 + 2);
+  const hireMsg = hireWorker(sim, bakery);
+  check(bakery.workers.length === w0 + 1, `найм не работает: ${hireMsg}`);
+  fireWorker(sim, bakery);
+  check(bakery.workers.length === w0, 'увольнение не работает');
+  setMaxWorkers(sim, bakery, Math.max(0, w0 - 1));
+  check(bakery.workers.length === Math.max(0, w0 - 1), 'предел рабочих не сокращает штат');
+  setClosed(sim, bakery, true);
+  check(bakery.closed === true, 'закрытие не работает');
+  setClosed(sim, bakery, false);
+  // Бот-строитель: 8 дней — лесопилка и дома должны достроиться подвозом материалов
+  const sawId = sawB ? sawB.id : -1;
+  const plotIds = plot.map((b) => b.id);
+  for (let t = 0; t < TICKS_PER_DAY * 8; t++) sim.step();
+  const done = [sawId, ...plotIds, shack2.id].filter((id) => id >= 0 && world.buildings[id].underConstruction === undefined && world.buildings[id].condition > 0).length;
+  check(done >= 2, `за 8 дней достроено только ${done} из ${1 + plotIds.length + 1} строек правителя`);
+  check(sawId < 0 || world.buildings[sawId].underConstruction === undefined, `лесопилка не достроена: ${Math.round((world.buildings[sawId].underConstruction ?? 0) * 100)}%, материалы ${JSON.stringify(Object.fromEntries(Object.entries(world.buildings[sawId].storage).filter(([k]) => k.startsWith('_'))))}`);
+  check(shack2.type === BuildingType.House || shack2.underConstruction !== undefined, 'улучшение лачуги не применилось');
+  check(sawId < 0 || world.buildings[sawId].workers.length > 0, 'в новую лесопилку никто не нанялся');
+  const money1 = sim.totalMoney();
+  const expected = sim.citizens.length ? money1 : money1;
+  void expected;
+  console.log(`  дороги: тропа ${nPath}, мощёная ${nRoad}; поле +${painted}; участок: ${plot.length} домов; достроено ${done}; лесопилка: работников ${sawId >= 0 ? world.buildings[sawId].workers.length : 0}; лачуга → ${shack2.type === BuildingType.House ? 'дом' : 'ещё строится'}`);
+  check(sim.citizens.every((c) => !c.alive || (Number.isFinite(c.x) && Number.isFinite(c.y))), 'NaN после стройки');
+  check(isRoadTile(world.tiles[tileIndex(world, gx + 5, gy + 2)] as Tile) || nPath === 0, 'тропа не стала дорогой');
+
 }
 
 // ---------------------------------------------------------------- Сохранения

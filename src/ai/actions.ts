@@ -12,7 +12,7 @@ import { pay, householdMoney } from '../economy/money';
 import { RECIPES, wantedStock, addStock, producersOf } from '../economy/production';
 import { sellersOf, isOpenAt } from '../economy/market';
 import { startTalk } from './talk';
-import { fellTree, takeResource, LOGS_PER_TREE } from '../sim/nature';
+import { fellTree, takeResource, LOGS_PER_TREE, farmFertility } from '../sim/nature';
 import { ResourceKind } from '../world/world';
 import { Good, GOOD_INFO } from '../economy/goods';
 import { EventKind } from '../events/chronicle';
@@ -289,6 +289,7 @@ const work: ActionDef = {
     if (c.workplace < 0 || !isWorkHour(sched, hour)) return 0;
     if (c.profession === Profession.Guard) return 0; // у стражи — патруль
     if (ctx.sim.world.buildings[c.workplace].condition <= 0) return 0; // рабочее место в руинах
+    if (ctx.sim.world.buildings[c.workplace].closed) return 0; // закрыто правителем
     if (c.actionData.dayOff === Math.floor(ctx.sim.tick / TICKS_PER_DAY)) return 0;
     let s = 50;
     if (hasTrait(c, Trait.Hardworking)) s += 10;
@@ -471,7 +472,7 @@ export function produce(sim: Simulation, b: Building, c: Citizen, ticks: number)
     sim.market.flow(g, bname, -use);
   }
 
-  const season = b.type === BuildingType.Farm ? sim.market.harvest(sim) : 1;
+  const season = b.type === BuildingType.Farm ? sim.market.harvest(sim) * farmFertility(sim.world, b) * 1.5 : 1;
   for (const [g, rate] of Object.entries(r.outputs) as [Good, number][]) {
     if (!rate) continue;
     const mul = b.type === BuildingType.Farm && g === 'grain' ? season : 1;

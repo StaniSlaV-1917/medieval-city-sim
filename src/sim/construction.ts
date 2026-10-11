@@ -3,7 +3,7 @@ import type { Simulation } from './game';
 import { Citizen, CitizenState, Profession, Trait, isChild, isElder, fullName, hasTrait } from './citizen';
 import { ACTIONS, ActionDef, actFor, goTo, say, think, remember } from '../ai/actions';
 import { makeCtx, interrupt } from '../ai/brain';
-import { Building, BuildingType, BUILDING_DEFS, District, Material, Roof } from '../world/buildings';
+import { Building, BuildingType, BUILDING_DEFS, District, Material, Roof, workerCap } from '../world/buildings';
 import { EventKind } from '../events/chronicle';
 import { TICKS_PER_DAY, TICKS_PER_HOUR, TICKS_PER_YEAR } from '../core/time';
 import { idx, isRoadTile, nearestWalkable, inBounds } from '../world/world';
@@ -12,6 +12,8 @@ import { isWorkHour } from './schedule';
 import { newCitizen, moveIn, assignJob, professionFor, randomTraits } from './population';
 import { MALE_NAMES, FEMALE_NAMES, SURNAMES } from './names';
 import { dist2 } from '../core/math';
+import { materialsLeft, applyUpgrade } from './build';
+import type { Good } from '../economy/goods';
 
 export const STAGE_NAMES = ['фундамент', 'каркас', 'стены', 'крыша'];
 
@@ -87,18 +89,18 @@ export function findHousing(sim: Simulation, c: Citizen): boolean {
 }
 
 /** Материалы на отстройку */
-function materialsNeeded(b: Building): { planks: number; stone: number } {
-  const area = b.w * b.h;
-  const stone = b.material === 'stone' || b.material === 'brick' ? Math.ceil(area * 0.6) : Math.ceil(area * 0.15);
-  const planks = Math.ceil(area * 0.5);
-  return { planks, stone };
-}
-
-/** Строительные работы: раз в 50 тиков назначаем строителей */
+/** Строительные работы: раз в 50 тиков назначаем строителей по очереди строек */
 export function updateConstruction(sim: Simulation): void {
   const tick = sim.tick;
   if (tick % 50 !== 0) return;
-  const sites = sim.world.buildings.filter((b) => b.w > 0 && b.underConstruction !== undefined && b.underConstruction < 1);
+  const q = sim.construction.queue;
+  // синхронизировать очередь со стройками (руины попадают в конец)
+  for (const b of sim.world.buildings) if (b.w > 0 && b.underConstruction !== undefined && b.underConstruction < 1 && !q.includes(b.id)) q.push(b.id);
+  for (let i = q.length - 1; i >= 0; i--) {
+    const b = sim.world.buildings[q[i]];
+    if (!b || b.w <= 0 || b.underConstruction === undefined) q.splice(i, 1);
+  }
+  const sites = q.map((id) => sim.world.buildings[id]).filter((b) => !b.paused);
   if (!sites.length) return;
   // строители: плотники, каменщики, подёнщики (в рабочие часы), пожарные-добровольцы
   const builders = sim.citizens.filter((c) => {
@@ -112,20 +114,37 @@ export function updateConstruction(sim: Simulation): void {
   if (!builders.length) return;
   for (const site of sites) {
     const onSite = sim.citizens.filter((c) => c.alive && c.action === 'build' && c.actionData.site === site.id).length;
-    const want = Math.min(4, 1 + Math.floor((site.w * site.h) / 8));
+    const want = Math.min(site.priority === 2 ? 6 : 4, 1 + Math.floor((site.w * site.h) / 8) + (site.priority === 2 ? 2 : 0));
     for (let k = onSite; k < want && builders.length; k++) {
-      // ближайший
       builders.sort((a, b) => dist2(a.x, a.y, site.doorX, site.doorY) - dist2(b.x, b.y, site.doorX, site.doorY));
       const c = builders.shift()!;
       interrupt(sim, c);
       c.action = 'build';
       c.actionData.site = site.id;
+      c.actionData.phase = 0;
       think(c, sim.rng.pick(['Пора отстраивать.', 'Брёвна, камень — и дом будет как новый.', 'Работы на неделю.', 'Разберём завалы.']));
       const spot = nearestWalkable(sim.world, site.doorX + sim.rng.int(-1, 1), site.doorY + sim.rng.int(0, 1), 3);
       const ctx = makeCtx(sim, c);
       if (!spot || !goTo(ctx, spot.x, spot.y)) c.action = '';
     }
   }
+}
+
+/** Где взять материал для стройки: склад, лесопилка, каменоломня, двор каменщика */
+function materialSource(sim: Simulation, site: Building, good: Good): Building | null {
+  let best: Building | null = null;
+  let bd = Infinity;
+  for (const b of sim.world.buildings) {
+    if (b.w <= 0 || b.id === site.id || b.underConstruction !== undefined || b.condition <= 0) continue;
+    if ((b.storage[good] ?? 0) < 1) continue;
+    if (!(b.type === BuildingType.Warehouse || b.type === BuildingType.Sawmill || b.type === BuildingType.Quarry || b.type === BuildingType.Mason || b.type === BuildingType.Carpenter || b.type === BuildingType.Merchant)) continue;
+    const d = dist2(b.doorX, b.doorY, site.doorX, site.doorY);
+    if (d < bd) {
+      bd = d;
+      best = b;
+    }
+  }
+  return best;
 }
 
 const build: ActionDef = {
@@ -135,7 +154,7 @@ const build: ActionDef = {
     const { c, sim, hour, sched } = ctx;
     if (c.action !== 'build') return 0;
     const site = sim.world.buildings[c.actionData.site];
-    if (!site || site.underConstruction === undefined || site.underConstruction >= 1) return 0;
+    if (!site || site.underConstruction === undefined || site.underConstruction >= 1 || site.paused) return 0;
     if (!isWorkHour({ ...sched, workStart: sched.workStart || 7, workEnd: sched.workEnd || 18 }, hour)) return 0;
     if (c.needs.hunger < 25 || c.needs.energy < 15) return 0;
     return 70;
@@ -144,12 +163,54 @@ const build: ActionDef = {
     const { c, sim } = ctx;
     const site = sim.world.buildings[c.actionData.site];
     if (!site) return false;
+    c.actionData.phase = 0;
     const spot = nearestWalkable(sim.world, site.doorX + ctx.rng.int(-1, 1), site.doorY + ctx.rng.int(0, 1), 3);
     if (!spot) return false;
     return goTo(ctx, spot.x, spot.y);
   },
   arrive(ctx) {
-    const { c } = ctx;
+    const { c, sim, rng } = ctx;
+    const site = sim.world.buildings[c.actionData.site];
+    if (!site || site.underConstruction === undefined) return actFor(ctx, 5);
+    const phase = c.actionData.phase ?? 0;
+    if (phase === 1) {
+      // пришёл к источнику материалов: взять и нести на стройку
+      const src = sim.world.buildings[c.actionData.haulFrom];
+      const good = c.actionData.haulGood === 1 ? 'stone' : 'planks';
+      if (src) {
+        const left = materialsLeft(site)[good as Good] ?? 0;
+        const n = Math.min(6, Math.floor(src.storage[good] ?? 0), Math.ceil(left));
+        const price = Math.round(n * sim.market.prices[good as Good]);
+        if (n > 0 && sim.treasury >= price) {
+          src.storage[good] -= n;
+          sim.treasury -= price;
+          const owner = src.owner >= 0 ? sim.citizens[src.owner] : null;
+          if (owner && owner.alive && owner.id !== c.id) owner.money += price;
+          else sim.treasury += price;
+          c.inventory[good] = (c.inventory[good] ?? 0) + n;
+          c.actionData.hauling = 1;
+          sim.market.flow(good as Good, 'стройка', -n);
+          if (rng.chance(0.4)) say(c, rng.pick(['Грузим на стройку.', 'Доски — на стройку!', 'Камень пошёл.']), 30, false, sim.tick);
+        } else if (rng.chance(0.3)) think(c, price > sim.treasury ? 'Казна не платит за материалы.' : 'Материалов нет.');
+      }
+      c.actionData.phase = 2;
+      const spot = nearestWalkable(sim.world, site.doorX, site.doorY, 3);
+      if (spot) goTo(ctx, spot.x, spot.y);
+      else actFor(ctx, 10);
+      return;
+    }
+    if (phase === 2) {
+      // принёс: сложить на площадке
+      for (const good of ['planks', 'stone'] as const) {
+        const n = c.inventory[good] ?? 0;
+        if (n > 0) {
+          site.storage[`_got_${good}`] = (site.storage[`_got_${good}`] ?? 0) + n;
+          c.inventory[good] = 0;
+        }
+      }
+      c.actionData.hauling = 0;
+      c.actionData.phase = 0;
+    }
     c.dir = 3;
     actFor(ctx, 30 * 5);
   },
@@ -157,35 +218,32 @@ const build: ActionDef = {
     const { c, sim, rng } = ctx;
     const site = sim.world.buildings[c.actionData.site];
     if (!site || site.underConstruction === undefined) return true;
-    // материалы: закупка городом со склада/лесопилки/каменоломни (раз в стадию)
-    const need = materialsNeeded(site);
+    if ((c.actionData.phase ?? 0) !== 0) return false;
+    // материалы: чего не хватает — сходить и принести
+    const left = materialsLeft(site);
     const stage = site.buildStage ?? 0;
-    const key = `_paid${stage}`;
-    if (!site.storage[key]) {
-      const planksNeed = Math.ceil(need.planks / 4);
-      const stoneNeed = Math.ceil(need.stone / 4);
-      let got = 0;
-      for (const [g, n] of [['planks', planksNeed], ['stone', stoneNeed]] as [string, number][]) {
-        if (n <= 0) {
-          got++;
-          continue;
-        }
-        const src = sim.world.buildings.find((b) => (b.storage[g] ?? 0) >= n && b.id !== site.id);
-        const price = Math.round(n * sim.market.prices[g as 'planks']);
-        if (src && sim.treasury >= price) {
-          src.storage[g] -= n;
-          sim.treasury -= price;
-          const owner = src.owner >= 0 ? sim.citizens[src.owner] : null;
-          if (owner && owner.alive) owner.money += price;
-          else sim.treasury += price;
-          got++;
-        }
-      }
-      if (got < 2) {
-        if (rng.chance(0.05)) think(c, rng.pick(['Нет досок — стройка стоит.', 'Ждём камень с каменоломни.', 'Казна не платит за материалы.']));
+    const needNow = (g: 'planks' | 'stone'): number => {
+      const total = site.storage[`_need_${g}`] ?? 0;
+      const got = site.storage[`_got_${g}`] ?? 0;
+      // к каждой стадии нужна четверть материалов
+      return Math.max(0, Math.ceil((total * (stage + 1)) / 4) - got);
+    };
+    const missing: ('planks' | 'stone')[] = [];
+    if (needNow('planks') > 0 && (left.planks ?? 0) > 0) missing.push('planks');
+    if (needNow('stone') > 0 && (left.stone ?? 0) > 0) missing.push('stone');
+    if (missing.length) {
+      const good = rng.pick(missing);
+      const src = materialSource(sim, site, good);
+      if (!src) {
+        if (rng.chance(0.03)) think(c, rng.pick(['Нет досок — стройка стоит.', 'Ждём камень с каменоломни.', 'На складе пусто.']));
         return false;
       }
-      site.storage[key] = 1;
+      c.actionData.phase = 1;
+      c.actionData.haulFrom = src.id;
+      c.actionData.haulGood = good === 'stone' ? 1 : 0;
+      if (rng.chance(0.5)) think(c, good === 'stone' ? 'Схожу за камнем.' : 'Схожу за досками.');
+      goTo(ctx, src.doorX, src.doorY);
+      return false;
     }
     let rate = 0.0025;
     if (c.profession === Profession.Carpenter || c.profession === Profession.Mason) rate *= 1.6;
@@ -214,6 +272,11 @@ function finishConstruction(sim: Simulation, b: Building): void {
   b.underConstruction = undefined;
   b.buildStage = undefined;
   b.condition = 1;
+  applyUpgrade(sim, b);
+  for (const k of Object.keys(b.storage)) if (k.startsWith('_need_') || k.startsWith('_got_')) delete b.storage[k];
+  if (BUILDING_DEFS[b.type].workers > 0 && !b.workers.length) jobMarket(sim, b);
+  const qi = sim.construction.queue.indexOf(b.id);
+  if (qi >= 0) sim.construction.queue.splice(qi, 1);
   sim.events.emit('building:done', { id: b.id });
   for (const k of Object.keys(b.storage)) if (k.startsWith('_paid')) delete b.storage[k];
   sim.buildingVersion++;
@@ -351,6 +414,27 @@ export function updateGrowth(sim: Simulation): void {
   if (tick % TICKS_PER_DAY === TICKS_PER_HOUR * 5) births(sim);
   // Приезжие и новые дома — раз в день в 12:00
   if (tick % TICKS_PER_DAY === TICKS_PER_HOUR * 12) migration(sim);
+  // Биржа труда — раз в день в 10:00: безработные идут туда, где есть места (сначала приоритетные)
+  if (tick % TICKS_PER_DAY === TICKS_PER_HOUR * 10) jobMarket(sim);
+}
+
+/** Безработные взрослые занимают свободные места; здания с приоритетом — первыми, ближние — раньше */
+export function jobMarket(sim: Simulation, only?: Building): number {
+  const free = sim.citizens.filter((c) => c.alive && !isChild(c) && !isElder(c) && c.workplace < 0 && !c.actionData.visitor && (c.profession === Profession.None || c.profession === Profession.Laborer) && c.jailedUntil <= sim.tick);
+  if (!free.length) return 0;
+  const sites = (only ? [only] : sim.world.buildings).filter((b) => b.w > 0 && b.condition > 0 && b.underConstruction === undefined && BUILDING_DEFS[b.type].workers > 0 && b.type !== BuildingType.Castle && b.workers.length < workerCap(b));
+  sites.sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
+  let hired = 0;
+  for (const b of sites) {
+    while (b.workers.length < workerCap(b) && free.length) {
+      free.sort((p, q) => dist2(p.x, p.y, b.doorX, b.doorY) - dist2(q.x, q.y, b.doorX, b.doorY));
+      const c = free.shift()!;
+      assignJob(sim, c, b, professionFor(b.type, b.workers.length));
+      remember(c, sim.tick, `Нанялся${c.sex === 'f' ? 'ась' : ''} в ${BUILDING_DEFS[b.type].name.toLowerCase()}.`, 0.5, -1, 'job');
+      hired++;
+    }
+  }
+  return hired;
 }
 
 function agePeople(sim: Simulation): void {
@@ -365,9 +449,9 @@ function agePeople(sim: Simulation): void {
       // семейное ремесло или первая работа
       const parent = c.parents.map((id) => sim.citizens[id]).find((p) => p && p.alive && p.workplace >= 0);
       const wp = parent ? sim.world.buildings[parent.workplace] : null;
-      if (wp && wp.workers.length < BUILDING_DEFS[wp.type].workers + 2) assignJob(sim, c, wp, professionFor(wp.type, wp.workers.length));
+      if (wp && wp.workers.length < workerCap(wp, 2)) assignJob(sim, c, wp, professionFor(wp.type, wp.workers.length));
       else {
-        const site = sim.world.buildings.find((b) => BUILDING_DEFS[b.type].workers > 0 && b.workers.length < BUILDING_DEFS[b.type].workers && b.type !== BuildingType.Castle && b.condition > 0);
+        const site = sim.world.buildings.find((b) => BUILDING_DEFS[b.type].workers > 0 && b.workers.length < workerCap(b) && b.type !== BuildingType.Castle && b.condition > 0 && b.underConstruction === undefined);
         if (site) assignJob(sim, c, site, professionFor(site.type, site.workers.length));
         else c.profession = Profession.Laborer;
       }
@@ -504,7 +588,7 @@ function migration(sim: Simulation): void {
       m.bio.push({ tick: sim.tick, text: `Приехал${m.sex === 'f' ? 'а' : ''} в Вальдмарк в поисках лучшей доли.` });
       m.thought = 'Новый город, новая жизнь.';
       if (!isChild(m) && m.sex === 'm') {
-        const site = sim.world.buildings.find((b) => BUILDING_DEFS[b.type].workers > 0 && b.workers.length < BUILDING_DEFS[b.type].workers + 1 && b.type !== BuildingType.Castle && b.condition > 0);
+        const site = sim.world.buildings.find((b) => BUILDING_DEFS[b.type].workers > 0 && b.workers.length < workerCap(b, 1) && b.type !== BuildingType.Castle && b.condition > 0 && b.underConstruction === undefined);
         if (site) assignJob(sim, m, site, professionFor(site.type, site.workers.length));
         else m.profession = Profession.Laborer;
       } else if (!isChild(m)) m.profession = Profession.Housewife;
